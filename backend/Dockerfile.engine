@@ -21,7 +21,7 @@ WORKDIR /app
 
 COPY requirements.txt ./
 RUN pip install -r requirements.txt \
- && pip install "GDAL==$(gdal-config --version)"
+ && pip install --no-build-isolation "GDAL==$(gdal-config --version)"
 
 RUN git clone --depth 1 https://github.com/innopam/urban_cd_v1.git /root/urban_cd_v1 \
  && pip install -r /root/urban_cd_v1/requirements/infer.txt \

@@ -21,7 +21,7 @@ WORKDIR /app
 
 COPY requirements.txt ./
 RUN pip install -r requirements.txt \
- && pip install "GDAL==$(gdal-config --version)"
+ && pip install --no-build-isolation "GDAL==$(gdal-config --version)"
 
 COPY . .
 
