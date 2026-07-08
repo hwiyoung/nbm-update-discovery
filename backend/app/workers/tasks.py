@@ -45,10 +45,11 @@ from app.workers.celery_app import celery_app
 
 from sqlalchemy import delete
 
-# engines/change-detection 디렉토리 import (compose 에서 마운트됨)
-ENGINES_PATH = Path("/engines/change-detection")
-if str(ENGINES_PATH) not in sys.path:
-    sys.path.insert(0, str(ENGINES_PATH))
+# Legacy mock engine import. The real algorithm runtime is resolved from
+# CHANGE_DETECTION_ALGORITHM_ROOT in app.services.change_detection_engine.
+LEGACY_MOCK_ENGINE_PATH = Path("/engines/change-detection")
+if str(LEGACY_MOCK_ENGINE_PATH) not in sys.path:
+    sys.path.insert(0, str(LEGACY_MOCK_ENGINE_PATH))
 
 try:
     from run import run as run_engine  # type: ignore[import-not-found]
@@ -905,7 +906,7 @@ def _run_algorithm_detection(
 
 
 def _call_engine(sheet_bbox: list[float], category: str) -> list[dict[str, Any]]:
-    """엔진 mock 호출. engines/change-detection/run.py 의 run() 사용.
+    """Legacy mock 엔진 호출. /engines/change-detection/run.py 의 run() 사용.
 
     Fallback: 엔진 마운트 안 된 경우 직접 무작위 폴리곤 생성.
     """

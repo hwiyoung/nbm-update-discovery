@@ -47,8 +47,8 @@ cd /opt/nbm-update-discovery
 - `docker-compose.prod.yml`
 - `.env.prod.example`
 - `frontend/`, `backend/`
-- `engines/change-detection/Road_CD`
-- `engines/change-detection/Building_CD`
+- `innopam-PM2022004-digital/02_Road_CD`
+- `innopam-PM2022004-digital/04_Building_CD`
 - `docs/DEPLOY_INSTALL_GUIDE.md`
 
 기존 소스 clone 폴더, `exports`, `.env`, `frontend/dist`는 배포 패키지에서 제외된다.
@@ -242,10 +242,10 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod exec celery-engin
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.prod exec celery-engine-worker \
-  sh -lc 'test -s /engines/change-detection/Road_CD/workspace/model/best_road.pth && echo road-ok'
+  sh -lc 'test -s /engines/pm/02_Road_CD/workspace/model/best_road.pth && echo road-ok'
 
 docker compose -f docker-compose.prod.yml --env-file .env.prod exec celery-engine-worker \
-  sh -lc 'test -s /engines/change-detection/Building_CD/workspace/model/best_building.pth && echo building-ok'
+  sh -lc 'test -s /engines/pm/04_Building_CD/workspace/model/best_building.pth && echo building-ok'
 ```
 
 호스트 저장 경로가 컨테이너에 제대로 마운트됐는지 확인한다.
