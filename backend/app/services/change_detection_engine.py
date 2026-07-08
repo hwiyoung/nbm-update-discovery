@@ -213,23 +213,53 @@ def run_algorithm_category(
 def _algorithm_spec(settings: Settings, category: str) -> AlgorithmSpec:
     root = Path(settings.change_detection_algorithm_root)
     if category == "road":
+        workspace = _resolve_algorithm_workspace(
+            root,
+            category="road",
+            candidates=("02_Road_CD", "Road_CD"),
+        )
         return AlgorithmSpec(
-            script=str(root / "Road_CD" / "workspace" / "predict.py"),
-            model_dir=str(root / "Road_CD" / "workspace" / "model"),
+            script=str(workspace / "predict.py"),
+            model_dir=str(workspace / "model"),
             confidence_threshold=settings.road_confidence_threshold,
             min_area_m2=settings.road_min_area_m2,
             simplify_tolerance=settings.road_simplify_tolerance,
         )
     if category == "building":
+        workspace = _resolve_algorithm_workspace(
+            root,
+            category="building",
+            candidates=("04_Building_CD", "Building_CD"),
+        )
         return AlgorithmSpec(
-            script=str(root / "Building_CD" / "workspace" / "predict.py"),
-            model_dir=str(root / "Building_CD" / "workspace" / "model"),
+            script=str(workspace / "predict.py"),
+            model_dir=str(workspace / "model"),
             confidence_threshold=settings.building_confidence_threshold,
             min_area_m2=settings.building_min_area_m2,
             simplify_tolerance=settings.building_simplify_tolerance,
             min_component_pixels=settings.building_min_component_pixels,
         )
     raise ValueError(f"unsupported change-detection category: {category}")
+
+
+def _resolve_algorithm_workspace(
+    root: Path,
+    *,
+    category: str,
+    candidates: tuple[str, ...],
+) -> Path:
+    """Resolve PM submodule layout first, with legacy engines layout fallback."""
+    checked: list[Path] = []
+    for dirname in candidates:
+        workspace = root / dirname / "workspace"
+        checked.append(workspace)
+        if (workspace / "predict.py").is_file():
+            return workspace
+    checked_text = ", ".join(str(path) for path in checked)
+    raise FileNotFoundError(
+        f"change-detection {category} workspace not found under "
+        f"{root}; checked: {checked_text}"
+    )
 
 
 def _prepare_algorithm_inputs(

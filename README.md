@@ -177,8 +177,8 @@ docker compose exec backend python scripts/seed.py
 
 # 변화탐지 엔진 런타임 확인
 docker compose exec celery-engine-worker nvidia-smi -L
-docker compose exec celery-engine-worker python /engines/change-detection/Road_CD/workspace/predict.py --help
-docker compose exec celery-engine-worker python /engines/change-detection/Building_CD/workspace/predict.py --help
+docker compose exec celery-engine-worker python /engines/pm/02_Road_CD/workspace/predict.py --help
+docker compose exec celery-engine-worker python /engines/pm/04_Building_CD/workspace/predict.py --help
 
 # 전체 종료
 docker compose down
@@ -216,8 +216,8 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod exec backend alem
 docker compose -f docker-compose.prod.yml --env-file .env.prod exec backend python scripts/seed.py
 curl -fsS http://localhost:${NBM_WEB_PORT:-18200}/
 docker compose -f docker-compose.prod.yml --env-file .env.prod exec celery-engine-worker nvidia-smi -L
-docker compose -f docker-compose.prod.yml --env-file .env.prod exec celery-engine-worker sh -lc 'test -s /engines/change-detection/Road_CD/workspace/model/best_road.pth'
-docker compose -f docker-compose.prod.yml --env-file .env.prod exec celery-engine-worker sh -lc 'test -s /engines/change-detection/Building_CD/workspace/model/best_building.pth'
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec celery-engine-worker sh -lc 'test -s /engines/pm/02_Road_CD/workspace/model/best_road.pth'
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec celery-engine-worker sh -lc 'test -s /engines/pm/04_Building_CD/workspace/model/best_building.pth'
 ```
 
 현재 기본 런타임은 실제 백엔드/실제 변화탐지 알고리즘이다. 프론트 mock은 `VITE_USE_MOCK=true`로 명시한 경우에만 켠다.

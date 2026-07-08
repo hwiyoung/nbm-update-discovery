@@ -47,6 +47,7 @@ services:
       - ORTHOMOSAIC_DIR=${ORTHOMOSAIC_DIR:-/data/orthomosaic}
       - CHANGE_DETECTION_QUEUE=${CHANGE_DETECTION_QUEUE:-engine}
       - CHANGE_DETECTION_ENGINE_MODE=${CHANGE_DETECTION_ENGINE_MODE:-algorithm}
+      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/pm}
       - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
       - CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT=${CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT:-/data/storage/preflight-cache}
       - CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED=${CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED:-true}
@@ -64,7 +65,7 @@ services:
       - CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO=${CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO:-0.5}
     volumes:
       - ./frontend/public/data:/data/seed:ro
-      - ./engines/change-detection:/engines/change-detection:ro
+      - ./innopam-PM2022004-digital:/engines/pm:ro
       - storage-data:/data/storage
       - ${HOST_EXPORT_OUTPUT_DIR:-./exports}:/data/storage/exports
       - type: bind
@@ -120,7 +121,7 @@ services:
       - PYTHONPATH=/app
       - CHANGE_DETECTION_QUEUE=${CHANGE_DETECTION_QUEUE:-engine}
       - CHANGE_DETECTION_ENGINE_MODE=${CHANGE_DETECTION_ENGINE_MODE:-algorithm}
-      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/change-detection}
+      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/pm}
       - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
       - CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT=${CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT:-/data/storage/preflight-cache}
       - CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED=${CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED:-true}
@@ -137,7 +138,7 @@ services:
       - CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO=${CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO:-0.0}
       - CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO=${CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO:-0.5}
     volumes:
-      - ./engines/change-detection:/engines/change-detection:ro
+      - ./innopam-PM2022004-digital:/engines/pm:ro
       - storage-data:/data/storage
       - ${HOST_EXPORT_OUTPUT_DIR:-./exports}:/data/storage/exports
       - type: bind
@@ -180,7 +181,7 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - PYTHONPATH=/app:/root/urban_cd_v1/common/src:/root/urban_cd_v1/road_cd/scripts:/root/urban_cd_v1/building_cd/phase3_semantic_cd/src:/root/urban_cd_v1
       - CHANGE_DETECTION_ENGINE_MODE=algorithm
-      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/change-detection}
+      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/pm}
       - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
       - CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT=${CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT:-/data/storage/preflight-cache}
       - CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED=${CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED:-true}
@@ -207,7 +208,7 @@ services:
       - BUILDING_MIN_COMPONENT_PIXELS=${BUILDING_MIN_COMPONENT_PIXELS:-200}
       - BUILDING_SIMPLIFY_TOLERANCE=${BUILDING_SIMPLIFY_TOLERANCE:-0.2}
     volumes:
-      - ./engines/change-detection:/engines/change-detection:ro
+      - ./innopam-PM2022004-digital:/engines/pm:ro
       - storage-data:/data/storage
       - ${HOST_EXPORT_OUTPUT_DIR:-./exports}:/data/storage/exports
       - type: bind

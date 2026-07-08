@@ -61,6 +61,7 @@ services:
       # 실제 알고리즘은 별도 GPU 워커의 engine 큐에서 처리.
       - CHANGE_DETECTION_QUEUE=${CHANGE_DETECTION_QUEUE:-engine}
       - CHANGE_DETECTION_ENGINE_MODE=${CHANGE_DETECTION_ENGINE_MODE:-algorithm}
+      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/pm}
       - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
       - CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT=${CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT:-/data/storage/preflight-cache}
       - CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED=${CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED:-true}
@@ -83,9 +84,8 @@ services:
       # 시드 스크립트가 더미 JSON 을 읽기 위한 read-only 마운트 (이정표 4).
       # DEMZExportService 의 sheet_index_path 도 본 경로 (sheets_grid_5179.geojson).
       - ./frontend/public/data:/data/seed:ro
-      # 변화탐지 엔진 마운트 (이정표 5) — backend 가 직접 호출하지 않지만,
-      # API 스키마/타입 일관성을 위해 import path 노출.
-      - ./engines/change-detection:/engines/change-detection:ro
+      # 변화탐지 엔진은 PM submodule 을 단일 원천으로 사용한다.
+      - ./innopam-PM2022004-digital:/engines/pm:ro
       # 업로드 파일 스토리지 (이정표 5). exports 는 별도 호스트 디렉토리로 분리.
       - storage-data:/data/storage
       # 변화탐지 결과물(SHP/DXF/PDF) 영구 저장소 — 호스트 측에서 직접 열람 가능.
@@ -156,7 +156,7 @@ services:
       - PYTHONPATH=/app
       - CHANGE_DETECTION_QUEUE=${CHANGE_DETECTION_QUEUE:-engine}
       - CHANGE_DETECTION_ENGINE_MODE=${CHANGE_DETECTION_ENGINE_MODE:-algorithm}
-      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/change-detection}
+      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/pm}
       - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
       - CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT=${CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT:-/data/storage/preflight-cache}
       - CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED=${CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED:-true}
@@ -174,7 +174,7 @@ services:
       - CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO=${CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO:-0.5}
     volumes:
       - ./backend:/app
-      - ./engines/change-detection:/engines/change-detection:ro
+      - ./innopam-PM2022004-digital:/engines/pm:ro
       - storage-data:/data/storage
       - ${HOST_EXPORT_OUTPUT_DIR:-./exports}:/data/storage/exports
       - type: bind
@@ -215,7 +215,7 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - PYTHONPATH=/app:/root/urban_cd_v1/common/src:/root/urban_cd_v1/road_cd/scripts:/root/urban_cd_v1/building_cd/phase3_semantic_cd/src:/root/urban_cd_v1
       - CHANGE_DETECTION_ENGINE_MODE=algorithm
-      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/change-detection}
+      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/pm}
       - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
       - CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT=${CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT:-/data/storage/preflight-cache}
       - CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED=${CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED:-true}
@@ -246,7 +246,7 @@ services:
       - BUILDING_SIMPLIFY_TOLERANCE=${BUILDING_SIMPLIFY_TOLERANCE:-0.2}
     volumes:
       - ./backend:/app
-      - ./engines/change-detection:/engines/change-detection:ro
+      - ./innopam-PM2022004-digital:/engines/pm:ro
       - storage-data:/data/storage
       - ${HOST_EXPORT_OUTPUT_DIR:-./exports}:/data/storage/exports
       - type: bind

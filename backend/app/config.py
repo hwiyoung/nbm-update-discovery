@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     # mock: 기존 경량 mock 엔진 사용. algorithm: 실제 도로/건물 변화탐지 알고리즘 사용.
     change_detection_queue: str = "engine"
     change_detection_engine_mode: str = "algorithm"
-    change_detection_algorithm_root: str = "/engines/change-detection"
+    change_detection_algorithm_root: str = "/engines/pm"
     change_detection_workspace_root: str = "/data/storage/exports"
     change_detection_preflight_cache_root: str = "/data/storage/preflight-cache"
     change_detection_preflight_cache_enabled: bool = True
