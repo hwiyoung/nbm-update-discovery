@@ -18,24 +18,67 @@
 
 ## 시작하기
 
-본 프로젝트의 모든 셋업·개발은 **Claude Code로 진행**한다. 사용자는 Docker만 설치하고 Claude Code에 프롬프트를 던지면 된다.
-
 ### 사전 요구사항
 
 - Docker Desktop 또는 Docker Engine + Docker Compose
 - (모델 추론용) NVIDIA GPU + CUDA Driver
-- Claude Code 사용 가능 환경
+- Git submodule 접근 권한
+- PM 모델 저장소 접근 권한
 
-### 첫 번째 작업
+### 새 clone
 
-1. 본 리포지토리를 빈 디렉토리에 클론한다.
-2. `docs/PROJECT_BRIEF.md`, `docs/DESIGN_SYSTEM.md`, `docs/FEATURE_SPEC.md` 가 배치되어 있는지 확인.
-3. Claude Code를 열고 `PROMPTS.md`의 **이정표 1 — 셋업** 프롬프트를 복사·붙여넣는다.
-4. Claude Code가 셋업을 진행한다 (Docker 설정·시작점 코드·더미 데이터까지).
-5. 셋업 완료 후 `docker compose up -d` 로 전체 시스템 기동.
-6. 다음 이정표로 진행.
+```bash
+git clone --recurse-submodules https://github.com/hwiyoung/nbm-update-discovery.git
+cd nbm-update-discovery
+git submodule status
+```
 
-이정표 6개 — 약 14일 작업.
+이미 clone한 디렉토리라면 submodule을 별도로 초기화한다.
+
+```bash
+git submodule update --init --recursive
+```
+
+### 모델 파일 세팅
+
+실제 변화탐지 엔진은 `innopam-PM2022004-digital` submodule을 사용한다.
+Git에는 실행 코드와 경로 보존용 dummy 파일만 포함되고, 실제 `.pth`와
+`model.safetensors`는 포함되지 않는다.
+
+모델 파일은 PM submodule 문서를 따라 배치한다.
+
+```bash
+cd innopam-PM2022004-digital
+less MODEL_SETUP.md
+
+test -s 02_Road_CD/workspace/model/best_road.pth
+test -s 04_Building_CD/workspace/model/best_building.pth
+test -s 02_Road_CD/workspace/model/dinov3-vitl16-pretrain-lvd1689m/model.safetensors
+test -s 04_Building_CD/workspace/model/dinov3-vitl16-pretrain-lvd1689m/model.safetensors
+cd ..
+```
+
+`engines/change-detection` 아래에 로컬 모델 파일이 남아 있더라도 그것은 현재
+런타임 원천이 아니다. 새 clone에는 해당 로컬 파일들이 따라오지 않는다.
+
+### 개발 stack 실행
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+curl -fsS http://127.0.0.1:${NBM_DEV_WEB_PORT:-18210}/health
+```
+
+브라우저 접속:
+
+```text
+http://<서버 IP>:18210/
+```
+
+### 개발 이정표
+
+아래 표는 초기 개발 계획과 진행 맥락이다. 현재 실행과 배포 절차는 본 README의
+`시작하기`, `일상적 명령`, `배포 전 점검` 절을 따른다.
 
 | # | 이정표 | 완료 시점 | 검증 |
 |---|---|---|---|
@@ -140,15 +183,47 @@ nbm-update-discovery/
 │       ├── workers/               Celery 작업
 │       └── utils/
 │
+├── innopam-PM2022004-digital/     PM 변화탐지 엔진 submodule
+│   ├── MODEL_SETUP.md             실제 모델 파일 배치 절차
+│   ├── 02_Road_CD/                도로 변화탐지 엔진
+│   └── 04_Building_CD/            건물 변화탐지 엔진
+│
 ├── engines/
-│   └── change-detection/          변화탐지 모델 호출 wrapper
-│       ├── Dockerfile
-│       └── (모델 코드 또는 호출 인터페이스)
+│   └── change-detection/          legacy mock compatibility
+│       ├── README.md
+│       └── run.py                 mock fallback 인터페이스
 │
 └── scripts/
     ├── inject-cog.sh
     ├── generate_dummy_detections.py
     └── healthcheck.sh
+```
+
+---
+
+## 변화탐지 엔진과 모델
+
+현재 기본 런타임은 실제 백엔드와 실제 변화탐지 알고리즘이다.
+
+- 엔진 소스의 단일 원천: `innopam-PM2022004-digital` submodule
+- 컨테이너 런타임 경로: `/engines/pm`
+- 기본 설정: `CHANGE_DETECTION_ALGORITHM_ROOT=/engines/pm`
+- 도로 엔진: `/engines/pm/02_Road_CD/workspace/predict.py`
+- 건물 엔진: `/engines/pm/04_Building_CD/workspace/predict.py`
+
+`engines/change-detection`는 legacy mock compatibility 용도만 남긴다. 실제
+`Road_CD`, `Building_CD` 엔진 복사본은 이 repo에서 제거되었고, 새 clone에는
+포함되지 않는다.
+
+모델 파일은 Git에 포함하지 않는다. PM submodule 안의 dummy 파일은 경로 보존용이며,
+실제 실행 전에는 `innopam-PM2022004-digital/MODEL_SETUP.md`에 따라 아래 파일을
+로컬에 배치해야 한다.
+
+```text
+innopam-PM2022004-digital/02_Road_CD/workspace/model/best_road.pth
+innopam-PM2022004-digital/04_Building_CD/workspace/model/best_building.pth
+innopam-PM2022004-digital/02_Road_CD/workspace/model/dinov3-vitl16-pretrain-lvd1689m/model.safetensors
+innopam-PM2022004-digital/04_Building_CD/workspace/model/dinov3-vitl16-pretrain-lvd1689m/model.safetensors
 ```
 
 ---
