@@ -16,12 +16,16 @@ export interface Dataset {
   id: number;
   source: DatasetSource;
   display_name: string; // 파일명, 예: "Anyang_2023.tif"
-  platform: string; // "위성" | "항공" | "드론"
+  platform: string; // 내부 호환용. 현재 UI 에서는 항공사진으로 고정.
   taken_start_at: string; // ISO 8601
   taken_end_at: string;
   bbox: Polygon; // 자원 커버리지 EPSG:4326
-  tile_path: string | null; // XYZ 타일 경로
+  tile_path: string | null; // 내부 처리/타일 렌더링용 경로
   sheet_codes: string[]; // 커버하는 도엽코드
+  regions: string[]; // 커버 도엽이 속한 권역 목록
+  primary_region: string | null; // 대표 권역
+  capture_year: number | null; // 촬영연도
+  host_path: string | null; // UI 표시용 호스트 경로
   status: DatasetStatus;
   thumbnail_url: string | null;
   size_bytes: number | null;
@@ -71,7 +75,7 @@ export interface DatasetFilter {
 }
 
 /**
- * 업로드 모달 메타 입력값.
+ * 자원 등록 모달 메타 입력값.
  */
 export interface DatasetUploadMeta {
   display_name: string;
@@ -81,7 +85,7 @@ export interface DatasetUploadMeta {
 }
 
 /**
- * 업로드 진행 상태 (services/upload.ts 가 emit).
+ * 자원 등록 진행 상태 (services/upload.ts 가 emit).
  */
 export type UploadStage =
   | "idle"

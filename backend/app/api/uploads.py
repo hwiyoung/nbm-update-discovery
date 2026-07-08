@@ -123,7 +123,7 @@ def upload_file(
     db.add(row)
     db.commit()
     db.refresh(row)
-    return dataset_to_schema(row)
+    return dataset_to_schema(row, db)
 
 
 class RegionPreviewResponse(BaseModel):
@@ -297,7 +297,7 @@ def register_from_server_path(
 
     existing = _find_existing_dataset_for_source(db, source)
     if existing is not None:
-        return dataset_to_schema(existing)
+        return dataset_to_schema(existing, db)
 
     upload_root = _ensure_upload_root()
     try:
@@ -356,7 +356,7 @@ def register_from_server_path(
     is_failed = not result.sheet_codes
     bbox_wkt = result.bbox_5186.wkt  # type: ignore[union-attr]
     row = DatasetORM(
-        source="aerial",
+        source="upload",
         display_name=payload.display_name,
         platform=payload.platform,
         taken_start_at=start,
@@ -380,4 +380,4 @@ def register_from_server_path(
                 pass
         raise
     db.refresh(row)
-    return dataset_to_schema(row)
+    return dataset_to_schema(row, db)

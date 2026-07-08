@@ -17,6 +17,7 @@ import {
   getDatasetPreflightMetadata,
   registerFromServerPath,
 } from "@/api/client";
+import { DEFAULT_DATASET_PLATFORM } from "@/utils/constants";
 import { WizardStepResource } from "./WizardStepResource";
 import { WizardStepMeta } from "./WizardStepMeta";
 import toast from "react-hot-toast";
@@ -236,7 +237,7 @@ export function NewTaskWizard() {
         const ds = await registerFromServerPath({
           server_path: pending.server_path,
           display_name: pending.display_name,
-          platform: pending.platform,
+          platform: DEFAULT_DATASET_PLATFORM,
           taken_start_at: range.start,
           taken_end_at: range.end,
         });

@@ -29,7 +29,7 @@ export interface PendingDataset {
 }
 
 /**
- * 백그라운드 업로드 진행 항목 — 데이터셋 패널 상단·헤더 종 알림이 구독.
+ * 백그라운드 등록 진행 항목 — 데이터셋 패널 상단·헤더 종 알림이 구독.
  * phase 별 단계 진행 + percent 0~100. 완료 후 5초 자동 제거.
  */
 export type PendingUploadPhase =
@@ -54,7 +54,7 @@ export interface WizardSelection {
   /** 기존 자원 선택. pending 과 상호 배타 (자원 1개당 둘 중 하나). */
   standardId: number | null;
   compareId: number | null;
-  /** PC 에서 새로 추가한 파일 (제출 시 업로드 예정). */
+  /** 서버 파일 브라우저에서 새로 추가한 파일 (제출 시 등록 예정). */
   standardPending: PendingDataset | null;
   comparePending: PendingDataset | null;
   name: string;
@@ -82,7 +82,7 @@ interface DatasetsState {
   pendingTaskId: string | null;
   setPendingTaskId: (id: string | null) => void;
 
-  /** 백그라운드 업로드 작업. 데이터셋 패널 상단 + 헤더 종 알림이 구독. */
+  /** 백그라운드 등록 작업. 데이터셋 패널 상단 + 헤더 종 알림이 구독. */
   pendingUploads: PendingUpload[];
   addPendingUpload: (entry: Omit<PendingUpload, "created_at">) => void;
   updatePendingUpload: (id: string, patch: Partial<PendingUpload>) => void;
@@ -259,12 +259,19 @@ export function applyDatasetFilter(
   const search = filter.search.trim().toLowerCase();
   return datasets.filter((d) => {
     if (search) {
-      const haystack = `${d.display_name} ${d.platform}`.toLowerCase();
+      const haystack = [
+        d.display_name,
+        d.primary_region,
+        ...d.regions,
+        d.host_path,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
       if (!haystack.includes(search)) return false;
     }
     if (filter.sources.length > 0 && !filter.sources.includes(d.source)) return false;
     if (filter.statuses.length > 0 && !filter.statuses.includes(d.status)) return false;
-    if (filter.platform && d.platform !== filter.platform) return false;
     if (filter.takenFrom) {
       if (new Date(d.taken_end_at) < new Date(filter.takenFrom)) return false;
     }

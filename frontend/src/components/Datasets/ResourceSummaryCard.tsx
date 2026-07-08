@@ -1,7 +1,11 @@
 import { FolderOpen, HardDrive } from "lucide-react";
 import type { Dataset } from "@/types";
 import type { WizardSelection } from "@/stores/datasetsStore";
-import { formatYearMonth } from "@/utils/formatters";
+import { DATASET_SOURCE_LABEL } from "@/utils/constants";
+import {
+  getDatasetCaptureYearLabel,
+  getDatasetRegionLabel,
+} from "@/utils/datasetMeta";
 import { cn } from "@/utils/cn";
 
 export interface ResourceSummaryCardProps {
@@ -74,7 +78,7 @@ export function ResourceSummaryCard({
             </div>
           </div>
           <div className="grid grid-cols-2 gap-1 text-[10px] pt-1 border-t border-slate-100">
-            <MiniField label="플랫폼" value={pendingMeta.platform} />
+            <MiniField label="자료 구분" value={DATASET_SOURCE_LABEL.upload} />
             <MiniField label="촬영 연도" value={pendingMeta.taken_year} />
           </div>
         </div>
@@ -87,15 +91,18 @@ export function ResourceSummaryCard({
                 {existing.display_name}
               </div>
               <div className="text-[10px] text-slate-400">
-                #{existing.id} · 도엽 {existing.sheet_codes.length}매
+                #{existing.id} · {getDatasetRegionLabel(existing)}
               </div>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-1 text-[10px] pt-1 border-t border-slate-100">
-            <MiniField label="플랫폼" value={existing.platform} />
             <MiniField
-              label="촬영"
-              value={formatYearMonth(existing.taken_start_at)}
+              label="도엽"
+              value={`${existing.sheet_codes.length.toLocaleString("ko-KR")}매`}
+            />
+            <MiniField
+              label="촬영 연도"
+              value={getDatasetCaptureYearLabel(existing)}
             />
           </div>
         </div>

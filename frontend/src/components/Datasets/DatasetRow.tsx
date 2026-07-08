@@ -1,10 +1,23 @@
 import { useState } from "react";
-import { CalendarDays, HardDrive, Layers, Sparkles, Trash2 } from "lucide-react";
+import {
+  CalendarDays,
+  FolderOpen,
+  HardDrive,
+  Layers,
+  MapPin,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import toast from "react-hot-toast";
 import { Badge, Button, Modal, ModalDescription } from "@/components/Common";
 import type { Dataset } from "@/types";
 import { DATASET_SOURCE_LABEL, DATASET_STATUS_LABEL } from "@/utils/constants";
-import { formatDate } from "@/utils/formatters";
+import {
+  formatDatasetFileSize,
+  getDatasetCaptureYearLabel,
+  getDatasetRegionLabel,
+  getDatasetRegionsTitle,
+} from "@/utils/datasetMeta";
 import { useDatasetsStore } from "@/stores/datasetsStore";
 import { auth } from "@/utils/auth";
 import { cn } from "@/utils/cn";
@@ -30,6 +43,10 @@ export function DatasetRow({ dataset }: { dataset: Dataset }) {
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const regionLabel = getDatasetRegionLabel(dataset);
+  const regionTitle = getDatasetRegionsTitle(dataset);
+  const captureYearLabel = getDatasetCaptureYearLabel(dataset);
+  const sizeLabel = formatDatasetFileSize(dataset.size_bytes);
 
   const onConfirmDelete = async () => {
     setSubmitting(true);
@@ -43,10 +60,6 @@ export function DatasetRow({ dataset }: { dataset: Dataset }) {
       setSubmitting(false);
     }
   };
-
-  const sizeMB = dataset.size_bytes
-    ? `${(dataset.size_bytes / 1024 / 1024).toFixed(0)} MB`
-    : "-";
 
   return (
     <>
@@ -83,19 +96,21 @@ export function DatasetRow({ dataset }: { dataset: Dataset }) {
               ) : null}
             </div>
             <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-500">
-              <span className="px-1.5 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-600 text-[10px] font-bold">
-                {sourceLabel}
-              </span>
-              <span className="text-slate-300">|</span>
-              <Layers size={11} className="text-slate-400" />
-              <span>{dataset.platform || "-"}</span>
-              <span className="text-slate-300">|</span>
-              <HardDrive size={11} className="text-slate-400" />
-              <span className="tabular-nums">{sizeMB}</span>
+              <MapPin size={11} className="text-slate-400" />
+              <span title={regionTitle}>{regionLabel}</span>
               <span className="text-slate-300">|</span>
               <CalendarDays size={11} className="text-slate-400" />
-              <span className="tabular-nums">
-                {formatDate(dataset.taken_start_at)}
+              <span className="tabular-nums">{captureYearLabel}</span>
+              <span className="text-slate-300">|</span>
+              <Layers size={11} className="text-slate-400" />
+              <span>도엽 {dataset.sheet_codes.length.toLocaleString("ko-KR")}매</span>
+              <span className="text-slate-300">|</span>
+              <HardDrive size={11} className="text-slate-400" />
+              <span className="tabular-nums">{sizeLabel}</span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-slate-400 mt-1">
+              <span className="px-1.5 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-600 font-bold">
+                {sourceLabel}
               </span>
             </div>
             {dataset.status === "failed" && dataset.thumbnail_url ? (
@@ -103,9 +118,13 @@ export function DatasetRow({ dataset }: { dataset: Dataset }) {
                 실패 사유: {dataset.thumbnail_url}
               </div>
             ) : null}
-            {dataset.sheet_codes.length > 0 ? (
-              <div className="text-[10px] text-slate-400 mt-1">
-                커버 도엽 {dataset.sheet_codes.length}매
+            {dataset.host_path ? (
+              <div
+                className="flex items-center gap-1 mt-1 text-[10px] text-slate-400 min-w-0"
+                title={dataset.host_path}
+              >
+                <FolderOpen size={10} className="shrink-0" />
+                <span className="truncate font-mono">{dataset.host_path}</span>
               </div>
             ) : null}
           </div>
@@ -160,9 +179,5 @@ export function DatasetRow({ dataset }: { dataset: Dataset }) {
 }
 
 function getDatasetSourceLabel(dataset: Dataset): string {
-  const tilePath = dataset.tile_path ?? "";
-  if (tilePath.startsWith("/media/") || tilePath.startsWith("/mnt/")) {
-    return "외장 링크";
-  }
   return DATASET_SOURCE_LABEL[dataset.source];
 }

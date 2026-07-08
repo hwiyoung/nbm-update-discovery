@@ -58,6 +58,7 @@ services:
       - EXPORT_OUTPUT_ROOT=${EXPORT_OUTPUT_ROOT:-/data/storage/exports}
       # 실감정사영상 산출물 폴더 — startup 시 .tif 자동 스캔 → aerial 데이터셋 등록.
       - ORTHOMOSAIC_DIR=${ORTHOMOSAIC_DIR:-/data/orthomosaic}
+      - HOST_ORTHOMOSAIC_DIR=${HOST_ORTHOMOSAIC_DIR:-}
       # 실제 알고리즘은 별도 GPU 워커의 engine 큐에서 처리.
       - CHANGE_DETECTION_QUEUE=${CHANGE_DETECTION_QUEUE:-engine}
       - CHANGE_DETECTION_ENGINE_MODE=${CHANGE_DETECTION_ENGINE_MODE:-algorithm}

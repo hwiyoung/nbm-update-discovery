@@ -41,6 +41,8 @@ export function DatasetsSection() {
       await loadDatasets();
       const parts: string[] = [];
       if (stats.registered > 0) parts.push(`신규 ${stats.registered}`);
+      if (stats.updated > 0) parts.push(`갱신 ${stats.updated}`);
+      if (stats.deduped > 0) parts.push(`중복정리 ${stats.deduped}`);
       if (stats.removed > 0) parts.push(`삭제 ${stats.removed}`);
       if (stats.blocked > 0) parts.push(`보존(참조중) ${stats.blocked}`);
       if (stats.failed > 0) parts.push(`실패 ${stats.failed}`);
@@ -90,14 +92,14 @@ export function DatasetsSection() {
                 leftIcon={<Plus size={12} />}
                 onClick={openUpload}
               >
-                업로드
+                자원 등록
               </Button>
             ) : null}
           </div>
         </div>
         <Input
           type="search"
-          placeholder="파일명·플랫폼 검색"
+          placeholder="파일명·권역·경로 검색"
           value={filter.search}
           onChange={(e) => setFilter({ search: e.target.value })}
           leftIcon={<Search size={14} />}
@@ -133,9 +135,9 @@ export function DatasetsSection() {
 
         {!loading && datasets.length === 0 ? (
           <div className="text-center text-xs text-slate-400 py-8">
-            업로드된 자원이 없습니다.
+            등록된 자원이 없습니다.
             <br />
-            상단 "업로드" 로 시작하세요.
+            상단 "자원 등록" 으로 시작하세요.
           </div>
         ) : null}
 

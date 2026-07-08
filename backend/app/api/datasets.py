@@ -73,7 +73,7 @@ def list_datasets(
     if platform:
         stmt = stmt.where(DatasetORM.platform == platform)
     rows = db.execute(stmt).scalars().all()
-    return [dataset_to_schema(r) for r in rows]
+    return [dataset_to_schema(r, db) for r in rows]
 
 
 @router.get("/overlap", response_model=OverlapResult)
@@ -387,7 +387,7 @@ def get_dataset(dataset_id: int, db: Session = Depends(get_db)) -> Dataset:
                 }
             },
         )
-    return dataset_to_schema(row)
+    return dataset_to_schema(row, db)
 
 
 @router.delete("/{dataset_id}")
@@ -477,7 +477,7 @@ def create_dataset(payload: DatasetCreate, db: Session = Depends(get_db)) -> Dat
     db.add(row)
     db.commit()
     db.refresh(row)
-    return dataset_to_schema(row)
+    return dataset_to_schema(row, db)
 
 
 @router.post("/rescan-orthomosaic")
@@ -512,4 +512,4 @@ def update_dataset_status(
     row.status = payload.status
     db.commit()
     db.refresh(row)
-    return dataset_to_schema(row)
+    return dataset_to_schema(row, db)

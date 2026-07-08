@@ -84,10 +84,12 @@ export const COMPARE_TYPE_LABEL: Readonly<Record<CompareType, string>> = {
 };
 
 export const DATASET_SOURCE_LABEL: Readonly<Record<DatasetSource, string>> = {
-  upload: "직접 업로드",
-  aerial: "항공촬영 자산",
-  external: "외부 자산",
+  upload: "외부 반입",
+  aerial: "정사영상 산출물",
+  external: "외부 링크",
 };
+
+export const DEFAULT_DATASET_PLATFORM = "항공";
 
 export const DATASET_STATUS_LABEL: Readonly<Record<DatasetStatus, string>> = {
   pending: "처리 대기",

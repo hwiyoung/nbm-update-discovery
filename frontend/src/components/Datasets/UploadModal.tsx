@@ -5,13 +5,13 @@ import { useDatasetsStore, type PendingUpload } from "@/stores/datasetsStore";
 import { uploadDatasetFromServer } from "@/services/upload";
 import type { FsEntry } from "@/api/client";
 import type { UploadProgress } from "@/types";
+import { DEFAULT_DATASET_PLATFORM } from "@/utils/constants";
 import { ServerFileBrowser } from "./ServerFileBrowser";
 import toast from "react-hot-toast";
 
 type UploadSnapshot = {
   serverFile: FsEntry;
   display_name: string;
-  platform: string;
   year: number;
 };
 
@@ -32,7 +32,6 @@ export function UploadModal() {
   const [browserOpen, setBrowserOpen] = useState(false);
   const [meta, setMeta] = useState({
     display_name: "",
-    platform: "항공",
     taken_year: String(new Date().getFullYear()),
   });
 
@@ -41,7 +40,6 @@ export function UploadModal() {
     setBrowserOpen(false);
     setMeta({
       display_name: "",
-      platform: "항공",
       taken_year: String(new Date().getFullYear()),
     });
   };
@@ -91,7 +89,7 @@ export function UploadModal() {
     try {
       const uploadMeta = {
         display_name: snap.display_name,
-        platform: snap.platform,
+        platform: DEFAULT_DATASET_PLATFORM,
         taken_start_at: new Date(`${snap.year}-01-01T00:00:00Z`).toISOString(),
         taken_end_at: new Date(`${snap.year}-12-31T23:59:59Z`).toISOString(),
       };
@@ -138,7 +136,7 @@ export function UploadModal() {
     <Modal
       open={open}
       onOpenChange={(o) => (!o ? onClose() : null)}
-      title="정사영상 업로드"
+      title="외부 정사영상 등록"
       icon={<Upload size={20} />}
       width={520}
       footer={
@@ -152,7 +150,7 @@ export function UploadModal() {
         </>
       }
     >
-      <ModalDescription>정사영상 파일과 메타정보를 입력합니다</ModalDescription>
+      <ModalDescription>외부 정사영상 파일 등록</ModalDescription>
 
       <div className="space-y-4">
         <div>
@@ -218,21 +216,7 @@ export function UploadModal() {
               }
             />
           </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1.5">
-              플랫폼
-            </label>
-            <select
-              value={meta.platform}
-              onChange={(e) => setMeta({ ...meta, platform: e.target.value })}
-              className="w-full h-9 px-3 py-2 border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="항공">항공</option>
-              <option value="위성">위성</option>
-              <option value="드론">드론</option>
-            </select>
-          </div>
-          <div>
+          <div className="col-span-2">
             <label className="block text-xs font-bold text-slate-500 mb-1.5">
               촬영 연도
             </label>

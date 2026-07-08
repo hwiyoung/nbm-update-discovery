@@ -29,6 +29,10 @@ class Dataset(BaseModel):
     bbox: GeoJsonPolygon
     tile_path: str | None = None
     sheet_codes: list[str] = Field(default_factory=list)
+    regions: list[str] = Field(default_factory=list)
+    primary_region: str | None = None
+    capture_year: int | None = None
+    host_path: str | None = None
     status: DatasetStatus
     thumbnail_url: str | None = None
     size_bytes: int | None = None

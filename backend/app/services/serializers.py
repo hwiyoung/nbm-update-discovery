@@ -5,7 +5,10 @@ Geometry 컬럼은 WKB(bytes-like) 로 들어오므로 EPSG:5186 → 4326 변환
 
 from __future__ import annotations
 
+import re
+from collections import Counter
 from datetime import datetime
+from pathlib import Path
 
 from app.config import get_settings
 from app.models.dataset import DatasetORM
@@ -22,6 +25,11 @@ from app.schemas import (
 )
 from app.services.task_progress import read_task_progress
 from app.utils.geo import bbox_from_geometry, wkb_to_geojson_4326
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+_FILENAME_YEAR_RE = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
+_FILENAME_SHORT_YEAR_RE = re.compile(r"(?<!\d)(2[0-9]|3[0-5])(?!\d)")
 
 
 def _wkb_str(value: object) -> bytes | str | None:
@@ -82,8 +90,69 @@ def detection_to_schema(row: DetectionORM) -> DetectionObject:
     )
 
 
-def dataset_to_schema(row: DatasetORM) -> Dataset:
+def _is_under_path(path: Path, root: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except ValueError:
+        return False
+    return True
+
+
+def _dataset_host_path(row: DatasetORM) -> str | None:
+    if not row.tile_path:
+        return None
+    settings = get_settings()
+    tile_path = Path(row.tile_path)
+    host_root = settings.host_orthomosaic_dir
+    if host_root:
+        container_root = Path(settings.orthomosaic_dir)
+        if _is_under_path(tile_path, container_root):
+            try:
+                rel = tile_path.resolve(strict=False).relative_to(
+                    container_root.resolve(strict=False)
+                )
+            except ValueError:
+                rel = Path(row.tile_path).relative_to(settings.orthomosaic_dir)
+            return str(Path(host_root) / rel)
+    if row.tile_path.startswith("/media/") or row.tile_path.startswith("/mnt/"):
+        return row.tile_path
+    return None
+
+
+def _dataset_regions(row: DatasetORM, db: Session | None) -> list[str]:
+    if db is None or not row.sheet_codes:
+        return []
+    rows = db.execute(
+        select(MapSheetORM.region).where(MapSheetORM.code.in_(row.sheet_codes))
+    ).all()
+    counts = Counter(region for (region,) in rows if region)
+    return [
+        region
+        for region, _ in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def _dataset_capture_year(row: DatasetORM) -> int | None:
+    if row.source == "aerial":
+        candidates = [row.display_name, row.tile_path]
+        for value in candidates:
+            if not value:
+                continue
+            match = _FILENAME_YEAR_RE.search(Path(value).name)
+            if match:
+                return int(match.group(1))
+        for value in candidates:
+            if not value:
+                continue
+            match = _FILENAME_SHORT_YEAR_RE.search(Path(value).stem)
+            if match:
+                return 2000 + int(match.group(1))
+    return row.taken_start_at.year if row.taken_start_at else None
+
+
+def dataset_to_schema(row: DatasetORM, db: Session | None = None) -> Dataset:
     bbox_4326 = wkb_to_geojson_4326(_wkb_str(row.bbox))
+    regions = _dataset_regions(row, db)
     return Dataset(
         id=row.id,
         source=row.source,  # type: ignore[arg-type]
@@ -94,6 +163,10 @@ def dataset_to_schema(row: DatasetORM) -> Dataset:
         bbox=bbox_4326 or {"type": "Polygon", "coordinates": []},
         tile_path=row.tile_path,
         sheet_codes=list(row.sheet_codes),
+        regions=regions,
+        primary_region=regions[0] if regions else None,
+        capture_year=_dataset_capture_year(row),
+        host_path=_dataset_host_path(row),
         status=row.status,  # type: ignore[arg-type]
         thumbnail_url=row.thumbnail_url,
         size_bytes=row.size_bytes,

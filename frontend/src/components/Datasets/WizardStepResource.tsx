@@ -3,8 +3,12 @@ import { CheckCircle2, FolderOpen, HardDrive, Loader2, MapPin, X } from "lucide-
 import { Input } from "@/components/Common";
 import { useDatasetsStore } from "@/stores/datasetsStore";
 import type { PendingDataset } from "@/stores/datasetsStore";
-import { DATASET_SOURCE_LABEL } from "@/utils/constants";
-import { formatYearMonth } from "@/utils/formatters";
+import { DATASET_SOURCE_LABEL, DEFAULT_DATASET_PLATFORM } from "@/utils/constants";
+import {
+  getDatasetCaptureYearLabel,
+  getDatasetRegionLabel,
+  getDatasetRegionsTitle,
+} from "@/utils/datasetMeta";
 import { cn } from "@/utils/cn";
 import { previewCaptureRegion, type RegionPreview } from "@/api/client";
 import { ServerFileBrowser } from "./ServerFileBrowser";
@@ -118,8 +122,12 @@ export function WizardStepResource({
                       <div className="text-xs font-bold text-slate-800 truncate">
                         {d.display_name}
                       </div>
-                      <div className="text-[11px] text-slate-500">
-                        {d.platform} · {formatYearMonth(d.taken_start_at)} · {d.sheet_codes.length}매
+                      <div
+                        className="text-[11px] text-slate-500 truncate"
+                        title={getDatasetRegionsTitle(d)}
+                      >
+                        {getDatasetRegionLabel(d)} · {getDatasetCaptureYearLabel(d)} · 도엽{" "}
+                        {d.sheet_codes.length.toLocaleString("ko-KR")}매
                       </div>
                     </div>
                     {active ? (
@@ -144,7 +152,7 @@ export function WizardStepResource({
             source_name: file.name,
             size_bytes: file.size ?? 0,
             display_name: baseName,
-            platform: "항공",
+            platform: DEFAULT_DATASET_PLATFORM,
             taken_year: String(new Date().getFullYear()),
           });
         }}
@@ -289,21 +297,7 @@ function PendingFileCard({
             onChange={(e) => onChange({ display_name: e.target.value })}
           />
         </div>
-        <div>
-          <label className="block text-[10px] font-bold text-slate-500 mb-1">
-            플랫폼
-          </label>
-          <select
-            value={pending.platform}
-            onChange={(e) => onChange({ platform: e.target.value })}
-            className="w-full h-9 px-2 py-1.5 border border-slate-200 rounded-md text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="항공">항공</option>
-            <option value="위성">위성</option>
-            <option value="드론">드론</option>
-          </select>
-        </div>
-        <div>
+        <div className="col-span-2">
           <label className="block text-[10px] font-bold text-slate-500 mb-1">
             촬영 연도
           </label>

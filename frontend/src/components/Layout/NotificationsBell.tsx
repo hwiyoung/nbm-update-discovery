@@ -11,10 +11,10 @@ import { cn } from "@/utils/cn";
 import { taskProgressMessageText } from "@/utils/taskProgress";
 
 /**
- * 헤더 우측의 알림 종 — 백그라운드 업로드·작업 진행 표시.
+ * 헤더 우측의 알림 종 — 백그라운드 자원 등록·작업 진행 표시.
  *
  * 클릭 시 드롭다운으로 항목 펼침. 활성 항목 수가 0 보다 크면 빨간 배지.
- *   - pendingUploads (업로드/좌표 분석)
+ *   - pendingUploads (자원 등록/좌표 분석)
  *   - pendingTaskId 가 있으면 폴링한 task (추론 진행)
  */
 export function NotificationsBell() {
@@ -134,7 +134,7 @@ export function NotificationsBell() {
             : "text-slate-600 hover:text-blue-600 hover:bg-slate-100",
           uploadActiveCount > 0 && "text-blue-600",
         )}
-        title={notificationsEmpty ? "업로드 알림 없음" : `업로드 진행 중 ${uploadActiveCount}개`}
+        title={notificationsEmpty ? "등록 알림 없음" : `등록 진행 중 ${uploadActiveCount}개`}
       >
         <Bell
           size={18}
@@ -170,7 +170,7 @@ export function NotificationsBell() {
           <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
             <span className="text-xs font-bold text-slate-700">알림</span>
             <span className="text-[11px] text-slate-400">
-              업로드 진행 중 {uploadActiveCount}개
+              등록 진행 중 {uploadActiveCount}개
             </span>
           </div>
           <div className="p-2 space-y-1.5">
@@ -179,7 +179,7 @@ export function NotificationsBell() {
             ))}
             {notificationsEmpty ? (
               <div className="text-center text-xs text-slate-400 py-6">
-                업로드 알림이 없습니다.
+                등록 알림이 없습니다.
               </div>
             ) : null}
           </div>

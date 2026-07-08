@@ -1,5 +1,5 @@
 import { Search } from "lucide-react";
-import { Input, Select } from "@/components/Common";
+import { Input } from "@/components/Common";
 import { useDatasetsStore } from "@/stores/datasetsStore";
 import {
   DATASET_SOURCE_LABEL,
@@ -38,7 +38,7 @@ export function DatasetFilterSidebar() {
         </label>
         <Input
           type="search"
-          placeholder="파일명·플랫폼"
+          placeholder="파일명·권역·경로"
           value={filter.search}
           onChange={(e) => setFilter({ search: e.target.value })}
           leftIcon={<Search size={16} />}
@@ -93,21 +93,6 @@ export function DatasetFilterSidebar() {
             );
           })}
         </div>
-      </div>
-
-      <div>
-        <label className="block text-xs font-bold text-slate-500 mb-1.5">
-          플랫폼
-        </label>
-        <Select
-          value={filter.platform ?? ""}
-          onChange={(e) => setFilter({ platform: e.target.value || null })}
-        >
-          <option value="">전체</option>
-          <option value="위성">위성</option>
-          <option value="항공">항공</option>
-          <option value="드론">드론</option>
-        </Select>
       </div>
 
       <div className="grid grid-cols-2 gap-2">

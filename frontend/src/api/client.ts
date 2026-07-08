@@ -420,7 +420,22 @@ export async function popHistory(
 // ============================================================
 
 interface DatasetIndexFile {
-  datasets: Dataset[];
+  datasets: DatasetWire[];
+}
+
+type DatasetWire = Omit<Dataset, "regions" | "primary_region" | "capture_year" | "host_path"> & Partial<Pick<
+  Dataset,
+  "regions" | "primary_region" | "capture_year" | "host_path"
+>>;
+
+function normalizeDataset(dataset: DatasetWire): Dataset {
+  return {
+    ...dataset,
+    regions: dataset.regions ?? [],
+    primary_region: dataset.primary_region ?? null,
+    capture_year: dataset.capture_year ?? getYearFromIso(dataset.taken_start_at),
+    host_path: dataset.host_path ?? null,
+  };
 }
 
 async function fetchDatasetsIndex(): Promise<Dataset[]> {
@@ -428,9 +443,10 @@ async function fetchDatasetsIndex(): Promise<Dataset[]> {
     const data = await fetchJson<DatasetIndexFile>(
       `${STATIC_DATA_BASE}/datasets/index.json`,
     );
-    return data.datasets ?? [];
+    return (data.datasets ?? []).map(normalizeDataset);
   }
-  return fetchJson<Dataset[]>(`${API_BASE_URL}/datasets`);
+  const datasets = await fetchJson<DatasetWire[]>(`${API_BASE_URL}/datasets`);
+  return datasets.map(normalizeDataset);
 }
 
 export async function listDatasets(): Promise<Dataset[]> {
@@ -440,12 +456,12 @@ export async function listDatasets(): Promise<Dataset[]> {
     datasetStatusKey,
     {},
   );
-  const userAdded = readLocal<Dataset[]>(userDatasetsKey, []);
+  const userAdded = readLocal<DatasetWire[]>(userDatasetsKey, []);
   const merged = baseList.map((d) => {
     const ov = statusOverrides[d.id];
     return ov ? { ...d, status: ov } : d;
   });
-  return merged.concat(userAdded);
+  return merged.concat(userAdded.map(normalizeDataset));
 }
 
 export async function getDataset(id: number): Promise<Dataset> {
@@ -478,6 +494,13 @@ export async function registerUploadedDataset(
       bbox,
       tile_path: tilePath,
       sheet_codes: sheetCodes,
+      regions: [],
+      primary_region: null,
+      capture_year: getYearFromIso(meta.taken_start_at),
+      host_path:
+        tilePath?.startsWith("/media/") || tilePath?.startsWith("/mnt/")
+          ? tilePath
+          : null,
       status: "processing",
       thumbnail_url: null,
       size_bytes: null,
@@ -550,7 +573,9 @@ export async function deleteDataset(id: number): Promise<void> {
 export interface OrthomosaicRescanStats {
   scanned: number;
   registered: number;
+  updated: number;
   skipped: number;
+  deduped: number;
   failed: number;
   /** 파일이 사라져 자동 삭제된 dataset 수. */
   removed: number;
@@ -561,13 +586,28 @@ export interface OrthomosaicRescanStats {
 export async function rescanOrthomosaic(): Promise<OrthomosaicRescanStats> {
   if (useMock) {
     // mock 모드에서는 호스트 폴더 스캔이 의미 없음 — no-op 으로 0 반환.
-    return { scanned: 0, registered: 0, skipped: 0, failed: 0, removed: 0, blocked: 0 };
+    return {
+      scanned: 0,
+      registered: 0,
+      updated: 0,
+      skipped: 0,
+      deduped: 0,
+      failed: 0,
+      removed: 0,
+      blocked: 0,
+    };
   }
   const res = await fetch(`${API_BASE_URL}/datasets/rescan-orthomosaic`, {
     method: "POST",
   });
   if (!res.ok) throw new Error(`rescanOrthomosaic failed: ${res.status}`);
   return (await res.json()) as OrthomosaicRescanStats;
+}
+
+function getYearFromIso(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const year = new Date(value).getFullYear();
+  return Number.isFinite(year) ? year : null;
 }
 
 export async function getDatasetPreflight(

@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     # 실감정사영상 산출물 디렉토리 — startup 시 .tif 자동 스캔 → aerial 데이터셋 등록.
     # 컨테이너 안에서 read-only 로 마운트되는 호스트 경로.
     orthomosaic_dir: str = "/data/orthomosaic"
+    # UI 표시용 호스트 실제 경로. 컨테이너 내부 경로(/data/orthomosaic)를 노출하지 않고
+    # 배포 서버에서 사용자가 찾을 수 있는 경로로 변환할 때 사용한다.
+    host_orthomosaic_dir: str | None = None
 
     # Change detection engine
     # mock: 기존 경량 mock 엔진 사용. algorithm: 실제 도로/건물 변화탐지 알고리즘 사용.

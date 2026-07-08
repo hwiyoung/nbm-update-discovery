@@ -1,10 +1,14 @@
 import { useState } from "react";
-import { CalendarDays, HardDrive, Image, Layers, Trash2 } from "lucide-react";
+import { CalendarDays, HardDrive, Image, MapPin, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { Badge, Button, Card, Modal, ModalDescription } from "@/components/Common";
 import type { Dataset } from "@/types";
 import { DATASET_SOURCE_LABEL, DATASET_STATUS_LABEL } from "@/utils/constants";
-import { formatYearMonth } from "@/utils/formatters";
+import {
+  formatDatasetFileSize,
+  getDatasetCaptureYearLabel,
+  getDatasetRegionLabel,
+} from "@/utils/datasetMeta";
 import { useDatasetsStore } from "@/stores/datasetsStore";
 import { auth } from "@/utils/auth";
 import { cn } from "@/utils/cn";
@@ -90,18 +94,14 @@ export function DatasetCard({ dataset, selected, onClick }: DatasetCardProps) {
           </div>
 
           <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-[11px] text-slate-500">
-            <CardField icon={<Layers size={12} />} label={dataset.platform || "-"} />
+            <CardField icon={<MapPin size={12} />} label={getDatasetRegionLabel(dataset)} />
             <CardField
               icon={<HardDrive size={12} />}
-              label={
-                dataset.size_bytes
-                  ? `${(dataset.size_bytes / 1024 / 1024).toFixed(0)} MB`
-                  : "-"
-              }
+              label={formatDatasetFileSize(dataset.size_bytes)}
             />
             <CardField
               icon={<CalendarDays size={12} />}
-              label={formatYearMonth(dataset.taken_start_at)}
+              label={getDatasetCaptureYearLabel(dataset)}
               colSpan
             />
           </div>

@@ -8,7 +8,7 @@ import {
 import { cn } from "@/utils/cn";
 
 /**
- * 데이터셋 패널 상단의 업로드 진행 row — 사용자가 dataset 목록 안에서 즉시
+ * 데이터셋 패널 상단의 등록 진행 row — 사용자가 dataset 목록 안에서 즉시
  * 진행 상황을 인지할 수 있도록 카드 형태로 prominent.
  */
 export function PendingUploadRow({ upload }: { upload: PendingUpload }) {
