@@ -1,0 +1,6 @@
+__pycache__
+*.pyc
+.git
+node_modules
+dist
+.cache/sheets-index-5179.geojson

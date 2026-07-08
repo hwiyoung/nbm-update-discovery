@@ -1,0 +1,38 @@
+diff --git a/node_modules/shp-write/src/geojson.js b/node_modules/shp-write/src/geojson.js
+index dfad6ee..eff32ee 100644
+--- a/node_modules/shp-write/src/geojson.js
++++ b/node_modules/shp-write/src/geojson.js
+@@ -1,26 +1,22 @@
+-module.exports.point = justType('Point', 'POINT');
+-module.exports.line = justType('LineString', 'POLYLINE');
+-module.exports.polygon = justType('Polygon', 'POLYGON');
++module.exports.point = justType("Point", "POINT");
++module.exports.line = justType("LineString", "POLYLINE");
++module.exports.polygon = justType("Polygon", "POLYGON");
+ 
++// Patched: feature 단위로 분리. 원본은 POLYGON/POLYLINE 을 한 record 로 합쳐 1개만 생성하는 버그가 있었음.
+ function justType(type, TYPE) {
+     return function(gj) {
+         var oftype = gj.features.filter(isType(type));
+         return {
+-            geometries: (TYPE === 'POLYGON' || TYPE === 'POLYLINE') ? [oftype.map(justCoords)] : oftype.map(justCoords),
++            geometries: oftype.map(justCoords),
+             properties: oftype.map(justProps),
+             type: TYPE
+         };
+     };
+ }
+ 
++// Patched: Polygon 의 모든 ring (outer + holes) 을 보존. 원본은 첫 ring 만 반환.
+ function justCoords(t) {
+-    if (t.geometry.coordinates[0] !== undefined &&
+-        t.geometry.coordinates[0][0] !== undefined &&
+-        t.geometry.coordinates[0][0][0] !== undefined) {
+-        return t.geometry.coordinates[0];
+-    } else {
+-        return t.geometry.coordinates;
+-    }
++    return t.geometry.coordinates;
+ }
+ 
+ function justProps(t) {

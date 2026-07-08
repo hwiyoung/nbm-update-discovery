@@ -1,0 +1,327 @@
+name: ${COMPOSE_PROJECT_NAME:-nbm_update}
+
+services:
+  frontend:
+    image: nbm-update-discovery-frontend-prod
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+        VITE_USE_MOCK: ${VITE_USE_MOCK:-false}
+    restart: unless-stopped
+    ports:
+      - "${HOST_BIND:-0.0.0.0}:${NBM_WEB_PORT:-18200}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+      titiler-cache:
+        condition: service_started
+
+  backend:
+    image: nbm-update-discovery-backend-prod
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    command: >
+      sh -c "gunicorn app.main:app
+      -k uvicorn.workers.UvicornWorker
+      --bind 0.0.0.0:8000
+      --workers ${BACKEND_WEB_CONCURRENCY:-2}
+      --timeout ${BACKEND_TIMEOUT:-600}"
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg2://nbm:nbm_dev_change_me@postgres:5432/nbm}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - JWT_SECRET=${JWT_SECRET:-__replace_in_production__}
+      - SECRET_KEY=${SECRET_KEY:-__replace_in_production__}
+      - SHEET_INDEX_PATH=${SHEET_INDEX_PATH:-/data/seed/sheets_grid_5179.geojson}
+      - SHEET_CODE_FIELD=${SHEET_CODE_FIELD:-MAPIDCD_NO}
+      - DEM_DIR=${DEM_DIR:-/data/dem}
+      - DEM_FILENAME_PATTERN=${DEM_FILENAME_PATTERN:-{sheet_code}.img}
+      - DEM_SAMPLE_METHOD=${DEM_SAMPLE_METHOD:-bilinear}
+      - DEM_TARGET_CRS=${DEM_TARGET_CRS:-EPSG:5186}
+      - EXPORT_OUTPUT_ROOT=${EXPORT_OUTPUT_ROOT:-/data/storage/exports}
+      - ORTHOMOSAIC_DIR=${ORTHOMOSAIC_DIR:-/data/orthomosaic}
+      - CHANGE_DETECTION_QUEUE=${CHANGE_DETECTION_QUEUE:-engine}
+      - CHANGE_DETECTION_ENGINE_MODE=${CHANGE_DETECTION_ENGINE_MODE:-algorithm}
+      - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
+      - CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT=${CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT:-/data/storage/preflight-cache}
+      - CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED=${CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED:-true}
+      - CHANGE_DETECTION_PREFLIGHT_MODE=${CHANGE_DETECTION_PREFLIGHT_MODE:-fast_safe}
+      - CHANGE_DETECTION_PREFLIGHT_PROGRESS_INTERVAL_S=${CHANGE_DETECTION_PREFLIGHT_PROGRESS_INTERVAL_S:-2}
+      - CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_TOLERANCE=${CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_TOLERANCE:-3}
+      - CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_SIEVE_PIXELS=${CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_SIEVE_PIXELS:-16}
+      - CHANGE_DETECTION_PREPARE_MODE=${CHANGE_DETECTION_PREPARE_MODE:-sheet_12cm}
+      - CHANGE_DETECTION_TARGET_GSD_M=${CHANGE_DETECTION_TARGET_GSD_M:-0.12}
+      - CHANGE_DETECTION_SHEET_BUFFER_M=${CHANGE_DETECTION_SHEET_BUFFER_M:-32}
+      - CHANGE_DETECTION_RESAMPLING=${CHANGE_DETECTION_RESAMPLING:-cubic}
+      - CHANGE_DETECTION_SHEET_PREFILTER_ENABLED=${CHANGE_DETECTION_SHEET_PREFILTER_ENABLED:-true}
+      - CHANGE_DETECTION_SHEET_PREFILTER_MAX_SAMPLE_PIXELS=${CHANGE_DETECTION_SHEET_PREFILTER_MAX_SAMPLE_PIXELS:-262144}
+      - CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO=${CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO:-0.0}
+      - CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO=${CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO:-0.5}
+    volumes:
+      - ./frontend/public/data:/data/seed:ro
+      - ./engines/change-detection:/engines/change-detection:ro
+      - storage-data:/data/storage
+      - ${HOST_EXPORT_OUTPUT_DIR:-./exports}:/data/storage/exports
+      - type: bind
+        source: ${HOST_ORTHOMOSAIC_DIR:-./data/orthomosaic}
+        target: /data/orthomosaic
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOST_DEM_DIR:-./data/dem}
+        target: /data/dem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /media
+        target: /media
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      - type: bind
+        source: /mnt
+        target: /mnt
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  celery-worker:
+    image: nbm-update-discovery-backend-prod
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    command: >
+      celery -A app.workers.celery_app.celery_app worker
+      --loglevel=info
+      --concurrency=${CELERY_CONCURRENCY:-2}
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg2://nbm:nbm_dev_change_me@postgres:5432/nbm}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - PYTHONPATH=/app
+      - CHANGE_DETECTION_QUEUE=${CHANGE_DETECTION_QUEUE:-engine}
+      - CHANGE_DETECTION_ENGINE_MODE=${CHANGE_DETECTION_ENGINE_MODE:-algorithm}
+      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/change-detection}
+      - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
+      - CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT=${CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT:-/data/storage/preflight-cache}
+      - CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED=${CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED:-true}
+      - CHANGE_DETECTION_PREFLIGHT_MODE=${CHANGE_DETECTION_PREFLIGHT_MODE:-fast_safe}
+      - CHANGE_DETECTION_PREFLIGHT_PROGRESS_INTERVAL_S=${CHANGE_DETECTION_PREFLIGHT_PROGRESS_INTERVAL_S:-2}
+      - CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_TOLERANCE=${CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_TOLERANCE:-3}
+      - CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_SIEVE_PIXELS=${CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_SIEVE_PIXELS:-16}
+      - CHANGE_DETECTION_PREPARE_MODE=${CHANGE_DETECTION_PREPARE_MODE:-sheet_12cm}
+      - CHANGE_DETECTION_TARGET_GSD_M=${CHANGE_DETECTION_TARGET_GSD_M:-0.12}
+      - CHANGE_DETECTION_SHEET_BUFFER_M=${CHANGE_DETECTION_SHEET_BUFFER_M:-32}
+      - CHANGE_DETECTION_RESAMPLING=${CHANGE_DETECTION_RESAMPLING:-cubic}
+      - CHANGE_DETECTION_SHEET_PREFILTER_ENABLED=${CHANGE_DETECTION_SHEET_PREFILTER_ENABLED:-true}
+      - CHANGE_DETECTION_SHEET_PREFILTER_MAX_SAMPLE_PIXELS=${CHANGE_DETECTION_SHEET_PREFILTER_MAX_SAMPLE_PIXELS:-262144}
+      - CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO=${CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO:-0.0}
+      - CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO=${CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO:-0.5}
+    volumes:
+      - ./engines/change-detection:/engines/change-detection:ro
+      - storage-data:/data/storage
+      - ${HOST_EXPORT_OUTPUT_DIR:-./exports}:/data/storage/exports
+      - type: bind
+        source: ${HOST_ORTHOMOSAIC_DIR:-./data/orthomosaic}
+        target: /data/orthomosaic
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /media
+        target: /media
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      - type: bind
+        source: /mnt
+        target: /mnt
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-engine-worker:
+    image: nbm-update-discovery-celery-engine-worker-prod
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.engine
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info --concurrency=1 -Q engine -n engine@%h
+    shm_size: ${CHANGE_DETECTION_SHM_SIZE:-16gb}
+    gpus: all
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg2://nbm:nbm_dev_change_me@postgres:5432/nbm}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - PYTHONPATH=/app:/root/urban_cd_v1/common/src:/root/urban_cd_v1/road_cd/scripts:/root/urban_cd_v1/building_cd/phase3_semantic_cd/src:/root/urban_cd_v1
+      - CHANGE_DETECTION_ENGINE_MODE=algorithm
+      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/change-detection}
+      - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
+      - CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT=${CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT:-/data/storage/preflight-cache}
+      - CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED=${CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED:-true}
+      - CHANGE_DETECTION_PREFLIGHT_MODE=${CHANGE_DETECTION_PREFLIGHT_MODE:-fast_safe}
+      - CHANGE_DETECTION_PREFLIGHT_PROGRESS_INTERVAL_S=${CHANGE_DETECTION_PREFLIGHT_PROGRESS_INTERVAL_S:-2}
+      - CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_TOLERANCE=${CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_TOLERANCE:-3}
+      - CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_SIEVE_PIXELS=${CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_SIEVE_PIXELS:-16}
+      - CHANGE_DETECTION_PREPARE_MODE=${CHANGE_DETECTION_PREPARE_MODE:-sheet_12cm}
+      - CHANGE_DETECTION_TARGET_GSD_M=${CHANGE_DETECTION_TARGET_GSD_M:-0.12}
+      - CHANGE_DETECTION_SHEET_BUFFER_M=${CHANGE_DETECTION_SHEET_BUFFER_M:-32}
+      - CHANGE_DETECTION_RESAMPLING=${CHANGE_DETECTION_RESAMPLING:-cubic}
+      - CHANGE_DETECTION_SHEET_PREFILTER_ENABLED=${CHANGE_DETECTION_SHEET_PREFILTER_ENABLED:-true}
+      - CHANGE_DETECTION_SHEET_PREFILTER_MAX_SAMPLE_PIXELS=${CHANGE_DETECTION_SHEET_PREFILTER_MAX_SAMPLE_PIXELS:-262144}
+      - CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO=${CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO:-0.0}
+      - CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO=${CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO:-0.5}
+      - CHANGE_DETECTION_PATCH_SIZE=${CHANGE_DETECTION_PATCH_SIZE:-1024}
+      - CHANGE_DETECTION_OVERLAP_RATIO=${CHANGE_DETECTION_OVERLAP_RATIO:-25}
+      - CHANGE_DETECTION_BATCH_SIZE=${CHANGE_DETECTION_BATCH_SIZE:-1}
+      - ROAD_CONFIDENCE_THRESHOLD=${ROAD_CONFIDENCE_THRESHOLD:-0.45}
+      - ROAD_MIN_AREA_M2=${ROAD_MIN_AREA_M2:-30}
+      - ROAD_SIMPLIFY_TOLERANCE=${ROAD_SIMPLIFY_TOLERANCE:-0.8}
+      - BUILDING_CONFIDENCE_THRESHOLD=${BUILDING_CONFIDENCE_THRESHOLD:-0.7}
+      - BUILDING_MIN_AREA_M2=${BUILDING_MIN_AREA_M2:-20}
+      - BUILDING_MIN_COMPONENT_PIXELS=${BUILDING_MIN_COMPONENT_PIXELS:-200}
+      - BUILDING_SIMPLIFY_TOLERANCE=${BUILDING_SIMPLIFY_TOLERANCE:-0.2}
+    volumes:
+      - ./engines/change-detection:/engines/change-detection:ro
+      - storage-data:/data/storage
+      - ${HOST_EXPORT_OUTPUT_DIR:-./exports}:/data/storage/exports
+      - type: bind
+        source: ${HOST_ORTHOMOSAIC_DIR:-./data/orthomosaic}
+        target: /data/orthomosaic
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /media
+        target: /media
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      - type: bind
+        source: /mnt
+        target: /mnt
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgis/postgis:15-3.4
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-nbm}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-nbm_dev_change_me}
+      - POSTGRES_DB=${POSTGRES_DB:-nbm}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  titiler:
+    image: ghcr.io/developmentseed/titiler:0.22.0
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      - GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR
+      - GDAL_HTTP_MERGE_CONSECUTIVE_RANGES=YES
+      - GDAL_HTTP_MULTIPLEX=YES
+      - GDAL_HTTP_VERSION=2
+      - GDAL_CACHEMAX=4096
+      - GDAL_BAND_BLOCK_CACHE=HASHSET
+      - VSI_CACHE=TRUE
+      - VSI_CACHE_SIZE=536870912
+      - WEB_CONCURRENCY=8
+      - CORS_ALLOW_ORIGINS=*
+    volumes:
+      - storage-data:/data/storage:ro
+      - type: bind
+        source: ${HOST_ORTHOMOSAIC_DIR:-./data/orthomosaic}
+        target: /data/orthomosaic
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /media
+        target: /media
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      - type: bind
+        source: /mnt
+        target: /mnt
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+
+  titiler-cache:
+    image: nginx:alpine
+    restart: unless-stopped
+    expose:
+      - "8000"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - titiler-cache-data:/var/cache/nginx
+      - type: bind
+        source: ${HOST_VWORLD_TILES_DIR:-./data/vworld_tiles}
+        target: /data/vworld_tiles
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      - titiler
+
+volumes:
+  postgres-data:
+  redis-data:
+  storage-data:
+  titiler-cache-data:

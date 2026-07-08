@@ -1,0 +1,25 @@
+{
+  "tasks": [
+    {
+      "id": "task-anyang-2024-001",
+      "name": "안양 권역 2022→2024 변화탐지",
+      "description": "기준 정사영상(2022) ↔ 비교 정사영상(2024) 건물·도로 변화탐지",
+      "models": [
+        "building",
+        "road"
+      ],
+      "compare_type": "image-image",
+      "standard_resource_id": 1001,
+      "compare_resource_id": 1002,
+      "sheet_codes": [
+        "37708034",
+        "37708024"
+      ],
+      "status": "succeeded",
+      "progress": 100,
+      "created_at": "2024-09-01T00:00:00Z",
+      "finished_at": "2024-09-01T01:30:00Z",
+      "celery_task_id": null
+    }
+  ]
+}

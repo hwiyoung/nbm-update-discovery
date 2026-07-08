@@ -1,0 +1,60 @@
+/* Pretendard 한글 폰트 (CDN) */
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css");
+
+/* Leaflet 베이스 스타일 — React-Leaflet 사용 시 필수 */
+@import url("leaflet/dist/leaflet.css");
+
+/* Leaflet draw — 폴리곤 그리기·편집 (이정표 3) */
+@import url("leaflet-draw/dist/leaflet.draw.css");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Global resets / 정통 라이트 테마 (DESIGN_SYSTEM.md 9 §)
+   ============================================================ */
+:root {
+  font-family:
+    "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: #f8fafc; /* slate-50 */
+  color: #1e293b; /* slate-800 */
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ---- Selection (단일 액센트 blue-600) ---- */
+::selection {
+  background-color: rgba(37, 99, 235, 0.18);
+  color: #1d4ed8;
+}
+
+/* ---- Custom scrollbar (DESIGN_SYSTEM 6.6) ---- */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1; /* slate-300 */
+  border-radius: 3px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8; /* slate-400 */
+}
+

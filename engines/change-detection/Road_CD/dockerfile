@@ -1,0 +1,24 @@
+# Base: PyTorch 2.4.1 + CUDA 12.1
+FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-devel
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# git: urban_cd_v1 clone
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
+
+# 모델 코드(urban_cd_v1) clone
+WORKDIR /root
+RUN git clone https://github.com/innopam/urban_cd_v1.git
+
+# 추론에 필요한 파이썬 패키지 설치
+RUN pip install --upgrade pip && \
+    pip install -r /root/urban_cd_v1/requirements/infer.txt && \
+    pip install shapely tqdm
+
+# urban_cd 패키지를 import 가능하게
+ENV PYTHONPATH="/root/urban_cd_v1/common/src:/root/urban_cd_v1/road_cd/scripts:/root/urban_cd_v1"

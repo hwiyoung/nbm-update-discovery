@@ -1,0 +1,70 @@
+# --- Node / Frontend ---
+node_modules/
+dist/
+build/
+.vite/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Python / Backend ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+*.so
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Docker / Local ---
+.env
+.env.prod
+.env.local
+.env.*.local
+*.pid
+
+# --- DB / Cache ---
+postgres-data/
+redis-data/
+titiler-cache/
+*.sqlite
+*.db
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Build artifacts ---
+*.tsbuildinfo
+coverage/
+.cache/
+
+# --- Project-specific ---
+.codex-backups/
+exports/
+innopam-PM2022004-digital/
+backend/storage/
+backend/uploads/
+frontend/public/data/regions/sheets-index.geojson
+frontend/vite.config.ts.timestamp-*
+engines/**/workspace/input/
+engines/**/workspace/output/
+engines/**/workspace/model/
+*.pth
+*.safetensors
+*.tif
+*.tiff

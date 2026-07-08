@@ -1,0 +1,366 @@
+# ============================================================
+# docker-compose.yml — 변화탐지 플랫폼 (개발용)
+#
+# 본 파일은 이정표 1 셋업의 산출물이다.
+# 운영용 구성은 이정표 6에서 docker-compose.prod.yml로 별도 작성.
+#
+# 기동: docker compose up -d
+# 종료: docker compose down
+# ============================================================
+
+name: ${COMPOSE_PROJECT_NAME:-nbm-update-discovery}
+
+services:
+  # --- 프론트엔드 (Vite dev server, HMR) ---
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    working_dir: /app
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+    ports:
+      # 개발 host publish 는 배포 18200 과 분리한다. Vite container 포트는 5173 유지.
+      - "${NBM_DEV_HOST_BIND:-0.0.0.0}:${NBM_DEV_WEB_PORT:-18210}:5173"
+    environment:
+      # 배포 패키지에서 frontend/.env 가 빠져도 backend 모드로 동작하도록 기본값을 주입.
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-/api/v1}
+      - VITE_USE_MOCK=${VITE_USE_MOCK:-false}
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    depends_on:
+      - backend
+      - titiler-cache
+
+  # --- 백엔드 (FastAPI + uvicorn dev) ---
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    working_dir: /app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg2://nbm:nbm_dev_change_me@postgres:5432/nbm}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - JWT_SECRET=${JWT_SECRET:-__replace_in_production__}
+      - SECRET_KEY=${SECRET_KEY:-__replace_in_production__}
+      # 3D DXF Export (DEM Z 주입) — sheet index 는 /data/seed 마운트 사용,
+      # DEM 디렉토리는 호스트의 도엽별 .img 디렉토리를 .env 로 매핑.
+      - SHEET_INDEX_PATH=${SHEET_INDEX_PATH:-/data/seed/sheets_grid_5179.geojson}
+      - SHEET_CODE_FIELD=${SHEET_CODE_FIELD:-MAPIDCD_NO}
+      - DEM_DIR=${DEM_DIR:-/data/dem}
+      - DEM_FILENAME_PATTERN=${DEM_FILENAME_PATTERN:-{sheet_code}.img}
+      - DEM_SAMPLE_METHOD=${DEM_SAMPLE_METHOD:-bilinear}
+      - DEM_TARGET_CRS=${DEM_TARGET_CRS:-EPSG:5186}
+      - EXPORT_OUTPUT_ROOT=${EXPORT_OUTPUT_ROOT:-/data/storage/exports}
+      # 실감정사영상 산출물 폴더 — startup 시 .tif 자동 스캔 → aerial 데이터셋 등록.
+      - ORTHOMOSAIC_DIR=${ORTHOMOSAIC_DIR:-/data/orthomosaic}
+      # 실제 알고리즘은 별도 GPU 워커의 engine 큐에서 처리.
+      - CHANGE_DETECTION_QUEUE=${CHANGE_DETECTION_QUEUE:-engine}
+      - CHANGE_DETECTION_ENGINE_MODE=${CHANGE_DETECTION_ENGINE_MODE:-algorithm}
+      - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
+      - CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT=${CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT:-/data/storage/preflight-cache}
+      - CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED=${CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED:-true}
+      - CHANGE_DETECTION_PREFLIGHT_MODE=${CHANGE_DETECTION_PREFLIGHT_MODE:-fast_safe}
+      - CHANGE_DETECTION_PREFLIGHT_PROGRESS_INTERVAL_S=${CHANGE_DETECTION_PREFLIGHT_PROGRESS_INTERVAL_S:-2}
+      - CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_TOLERANCE=${CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_TOLERANCE:-3}
+      - CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_SIEVE_PIXELS=${CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_SIEVE_PIXELS:-16}
+      - CHANGE_DETECTION_PREPARE_MODE=${CHANGE_DETECTION_PREPARE_MODE:-sheet_12cm}
+      - CHANGE_DETECTION_TARGET_GSD_M=${CHANGE_DETECTION_TARGET_GSD_M:-0.12}
+      - CHANGE_DETECTION_SHEET_BUFFER_M=${CHANGE_DETECTION_SHEET_BUFFER_M:-32}
+      - CHANGE_DETECTION_RESAMPLING=${CHANGE_DETECTION_RESAMPLING:-cubic}
+      - CHANGE_DETECTION_SHEET_PREFILTER_ENABLED=${CHANGE_DETECTION_SHEET_PREFILTER_ENABLED:-true}
+      - CHANGE_DETECTION_SHEET_PREFILTER_MAX_SAMPLE_PIXELS=${CHANGE_DETECTION_SHEET_PREFILTER_MAX_SAMPLE_PIXELS:-262144}
+      - CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO=${CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO:-0.0}
+      - CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO=${CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO:-0.5}
+      - CHANGE_DETECTION_PARALLEL_MODELS=${CHANGE_DETECTION_PARALLEL_MODELS:-true}
+      - CHANGE_DETECTION_PARALLEL_GPU_MEMORY_LIMIT=${CHANGE_DETECTION_PARALLEL_GPU_MEMORY_LIMIT:-0.25}
+    volumes:
+      - ./backend:/app
+      # 시드 스크립트가 더미 JSON 을 읽기 위한 read-only 마운트 (이정표 4).
+      # DEMZExportService 의 sheet_index_path 도 본 경로 (sheets_grid_5179.geojson).
+      - ./frontend/public/data:/data/seed:ro
+      # 변화탐지 엔진 마운트 (이정표 5) — backend 가 직접 호출하지 않지만,
+      # API 스키마/타입 일관성을 위해 import path 노출.
+      - ./engines/change-detection:/engines/change-detection:ro
+      # 업로드 파일 스토리지 (이정표 5). exports 는 별도 호스트 디렉토리로 분리.
+      - storage-data:/data/storage
+      # 변화탐지 결과물(SHP/DXF/PDF) 영구 저장소 — 호스트 측에서 직접 열람 가능.
+      # .env 의 HOST_EXPORT_OUTPUT_DIR 로 지정. 미지정 시 프로젝트 내 ./exports.
+      - ${HOST_EXPORT_OUTPUT_DIR:-./exports}:/data/storage/exports
+      # 실감정사영상 산출물 디렉토리 — 호스트 실 경로를 .env 의 HOST_ORTHOMOSAIC_DIR
+      # 로 지정. .tif 파일들이 startup 스캔 시 aerial 데이터셋으로 자동 등록된다.
+      # backend 업로드 API 도 이 경로에 사용자가 올린 정사영상을 저장한다.
+      - type: bind
+        source: ${HOST_ORTHOMOSAIC_DIR:-./data/orthomosaic}
+        target: /data/orthomosaic
+        bind:
+          create_host_path: false
+      # 도엽별 DEM .img 타일 디렉토리. 호스트 실 경로를 .env 의 HOST_DEM_DIR 로
+      # 지정 (예: /media/innopam/InnoPAM-8TB/dem/5k_5179). 미지정 시 더미 디렉토리.
+      - type: bind
+        source: ${HOST_DEM_DIR:-./data/dem}
+        target: /data/dem
+        read_only: true
+        bind:
+          create_host_path: false
+      # 호스트 파일 시스템 browse 용 read-only 마운트 — 사용자가 /media 의
+      # 외장하드·로컬 폴더에서 TIFF 를 직접 선택할 수 있게.
+      - type: bind
+        source: /media
+        target: /media
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      - type: bind
+        source: /mnt
+        target: /mnt
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+    depends_on:
+      - postgres
+      - redis
+
+  # --- PostgreSQL + PostGIS ---
+  postgres:
+    image: postgis/postgis:15-3.4
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-nbm}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-nbm_dev_change_me}
+      - POSTGRES_DB=${POSTGRES_DB:-nbm}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  # --- Redis (Celery 브로커) ---
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+
+  # --- Celery 워커 (변화탐지 추론 큐) ---
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    working_dir: /app
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg2://nbm:nbm_dev_change_me@postgres:5432/nbm}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - PYTHONPATH=/app
+      - CHANGE_DETECTION_QUEUE=${CHANGE_DETECTION_QUEUE:-engine}
+      - CHANGE_DETECTION_ENGINE_MODE=${CHANGE_DETECTION_ENGINE_MODE:-algorithm}
+      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/change-detection}
+      - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
+      - CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT=${CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT:-/data/storage/preflight-cache}
+      - CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED=${CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED:-true}
+      - CHANGE_DETECTION_PREFLIGHT_MODE=${CHANGE_DETECTION_PREFLIGHT_MODE:-fast_safe}
+      - CHANGE_DETECTION_PREFLIGHT_PROGRESS_INTERVAL_S=${CHANGE_DETECTION_PREFLIGHT_PROGRESS_INTERVAL_S:-2}
+      - CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_TOLERANCE=${CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_TOLERANCE:-3}
+      - CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_SIEVE_PIXELS=${CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_SIEVE_PIXELS:-16}
+      - CHANGE_DETECTION_PREPARE_MODE=${CHANGE_DETECTION_PREPARE_MODE:-sheet_12cm}
+      - CHANGE_DETECTION_TARGET_GSD_M=${CHANGE_DETECTION_TARGET_GSD_M:-0.12}
+      - CHANGE_DETECTION_SHEET_BUFFER_M=${CHANGE_DETECTION_SHEET_BUFFER_M:-32}
+      - CHANGE_DETECTION_RESAMPLING=${CHANGE_DETECTION_RESAMPLING:-cubic}
+      - CHANGE_DETECTION_SHEET_PREFILTER_ENABLED=${CHANGE_DETECTION_SHEET_PREFILTER_ENABLED:-true}
+      - CHANGE_DETECTION_SHEET_PREFILTER_MAX_SAMPLE_PIXELS=${CHANGE_DETECTION_SHEET_PREFILTER_MAX_SAMPLE_PIXELS:-262144}
+      - CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO=${CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO:-0.0}
+      - CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO=${CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO:-0.5}
+    volumes:
+      - ./backend:/app
+      - ./engines/change-detection:/engines/change-detection:ro
+      - storage-data:/data/storage
+      - ${HOST_EXPORT_OUTPUT_DIR:-./exports}:/data/storage/exports
+      - type: bind
+        source: ${HOST_ORTHOMOSAIC_DIR:-./data/orthomosaic}
+        target: /data/orthomosaic
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /media
+        target: /media
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      - type: bind
+        source: /mnt
+        target: /mnt
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+    depends_on:
+      - postgres
+      - redis
+
+  # --- Celery GPU 워커 (실제 도로/건물 변화탐지 알고리즘) ---
+  celery-engine-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.engine
+    working_dir: /app
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info --concurrency=1 -Q engine -n engine@%h
+    shm_size: ${CHANGE_DETECTION_SHM_SIZE:-16gb}
+    gpus: all
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg2://nbm:nbm_dev_change_me@postgres:5432/nbm}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - PYTHONPATH=/app:/root/urban_cd_v1/common/src:/root/urban_cd_v1/road_cd/scripts:/root/urban_cd_v1/building_cd/phase3_semantic_cd/src:/root/urban_cd_v1
+      - CHANGE_DETECTION_ENGINE_MODE=algorithm
+      - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/change-detection}
+      - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
+      - CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT=${CHANGE_DETECTION_PREFLIGHT_CACHE_ROOT:-/data/storage/preflight-cache}
+      - CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED=${CHANGE_DETECTION_PREFLIGHT_CACHE_ENABLED:-true}
+      - CHANGE_DETECTION_PREFLIGHT_MODE=${CHANGE_DETECTION_PREFLIGHT_MODE:-fast_safe}
+      - CHANGE_DETECTION_PREFLIGHT_PROGRESS_INTERVAL_S=${CHANGE_DETECTION_PREFLIGHT_PROGRESS_INTERVAL_S:-2}
+      - CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_TOLERANCE=${CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_TOLERANCE:-3}
+      - CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_SIEVE_PIXELS=${CHANGE_DETECTION_PREFLIGHT_RGB_NODATA_SIEVE_PIXELS:-16}
+      - CHANGE_DETECTION_PREPARE_MODE=${CHANGE_DETECTION_PREPARE_MODE:-sheet_12cm}
+      - CHANGE_DETECTION_TARGET_GSD_M=${CHANGE_DETECTION_TARGET_GSD_M:-0.12}
+      - CHANGE_DETECTION_SHEET_BUFFER_M=${CHANGE_DETECTION_SHEET_BUFFER_M:-32}
+      - CHANGE_DETECTION_RESAMPLING=${CHANGE_DETECTION_RESAMPLING:-cubic}
+      - CHANGE_DETECTION_SHEET_PREFILTER_ENABLED=${CHANGE_DETECTION_SHEET_PREFILTER_ENABLED:-true}
+      - CHANGE_DETECTION_SHEET_PREFILTER_MAX_SAMPLE_PIXELS=${CHANGE_DETECTION_SHEET_PREFILTER_MAX_SAMPLE_PIXELS:-262144}
+      - CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO=${CHANGE_DETECTION_SHEET_PREFILTER_MIN_VALID_RATIO:-0.0}
+      - CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO=${CHANGE_DETECTION_OUTPUT_VALID_MASK_MIN_RATIO:-0.5}
+      - CHANGE_DETECTION_PATCH_SIZE=${CHANGE_DETECTION_PATCH_SIZE:-1024}
+      - CHANGE_DETECTION_OVERLAP_RATIO=${CHANGE_DETECTION_OVERLAP_RATIO:-25}
+      - CHANGE_DETECTION_BATCH_SIZE=${CHANGE_DETECTION_BATCH_SIZE:-1}
+      - CHANGE_DETECTION_PARALLEL_MODELS=${CHANGE_DETECTION_PARALLEL_MODELS:-true}
+      - CHANGE_DETECTION_PARALLEL_GPU_MEMORY_LIMIT=${CHANGE_DETECTION_PARALLEL_GPU_MEMORY_LIMIT:-0.25}
+      - CHANGE_DETECTION_PARALLEL_GPU_ID=${CHANGE_DETECTION_PARALLEL_GPU_ID:-}
+      - ROAD_CONFIDENCE_THRESHOLD=${ROAD_CONFIDENCE_THRESHOLD:-0.45}
+      - ROAD_MIN_AREA_M2=${ROAD_MIN_AREA_M2:-30}
+      - ROAD_SIMPLIFY_TOLERANCE=${ROAD_SIMPLIFY_TOLERANCE:-0.8}
+      - BUILDING_CONFIDENCE_THRESHOLD=${BUILDING_CONFIDENCE_THRESHOLD:-0.7}
+      - BUILDING_MIN_AREA_M2=${BUILDING_MIN_AREA_M2:-20}
+      - BUILDING_MIN_COMPONENT_PIXELS=${BUILDING_MIN_COMPONENT_PIXELS:-200}
+      - BUILDING_SIMPLIFY_TOLERANCE=${BUILDING_SIMPLIFY_TOLERANCE:-0.2}
+    volumes:
+      - ./backend:/app
+      - ./engines/change-detection:/engines/change-detection:ro
+      - storage-data:/data/storage
+      - ${HOST_EXPORT_OUTPUT_DIR:-./exports}:/data/storage/exports
+      - type: bind
+        source: ${HOST_ORTHOMOSAIC_DIR:-./data/orthomosaic}
+        target: /data/orthomosaic
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /media
+        target: /media
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      - type: bind
+        source: /mnt
+        target: /mnt
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+    depends_on:
+      - postgres
+      - redis
+
+  # --- TiTiler (COG 타일 서빙) ---
+  # 0.22.0 = 2.0.0 직전 안정 버전. 2.0 의 WebMercatorQuad 타일 bound check 가
+  # EPSG:5186 같은 비-WebMercator CRS 에서 "outside bounds" 오답하는 회귀 우회.
+  titiler:
+    image: ghcr.io/developmentseed/titiler:0.22.0
+    # 외부 포트 expose 안 함 — nginx 캐싱 프록시 경유로만 접근.
+    expose:
+      - "8000"
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      # GDAL 최적화 + CORS — 프론트는 /titiler 프록시 경유
+      - GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR
+      - GDAL_HTTP_MERGE_CONSECUTIVE_RANGES=YES
+      - GDAL_HTTP_MULTIPLEX=YES
+      - GDAL_HTTP_VERSION=2
+      # 큰 4-band COG 가 여러 개라 캐시 확대 (4GB) + 블록 캐시
+      - GDAL_CACHEMAX=4096
+      - GDAL_BAND_BLOCK_CACHE=HASHSET
+      - VSI_CACHE=TRUE
+      - VSI_CACHE_SIZE=536870912
+      # gunicorn 워커 — 동시 타일 요청 병렬 처리 (CPU 코어 기준)
+      - WEB_CONCURRENCY=8
+      - CORS_ALLOW_ORIGINS=*
+    volumes:
+      # 기존 storage-data TIFF 를 read-only 로 마운트.
+      - storage-data:/data/storage:ro
+      # 정사영상 풀과 웹 업로드 TIFF 를 read-only 로 마운트.
+      - type: bind
+        source: ${HOST_ORTHOMOSAIC_DIR:-./data/orthomosaic}
+        target: /data/orthomosaic
+        read_only: true
+        bind:
+          create_host_path: false
+      # 호스트 파일 시스템 — backend 와 동일하게 마운트. ServerFileBrowser 로
+      # 선택된 영상의 tile_path 가 /media/... 일 때 TiTiler 가 직접 읽도록.
+      - type: bind
+        source: /media
+        target: /media
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      - type: bind
+        source: /mnt
+        target: /mnt
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+
+  # --- TiTiler 타일 캐싱 프록시 + VWorld 오프라인 타일 정적 서버 (nginx) ---
+  # /cog/* — TiTiler 응답을 디스크 4GB 캐시에 보존. 두 번째 요청부터 GDAL skip.
+  # /vworld/* — 호스트의 vworld_tiles 디렉토리를 정적 서빙. 베이스맵 용도.
+  titiler-cache:
+    image: nginx:alpine
+    expose:
+      - "8000"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - titiler-cache-data:/var/cache/nginx
+      # VWorld 오프라인 타일 (z/x/y.jpg, EPSG:3857). 호스트 경로는 .env 의
+      # HOST_VWORLD_TILES_DIR 로 지정. 미지정 시 본 리포의 더미 폴더.
+      - type: bind
+        source: ${HOST_VWORLD_TILES_DIR:-./data/vworld_tiles}
+        target: /data/vworld_tiles
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      - titiler
+
+  # --- 일회성 작업용 컨테이너 (더미 데이터·시드 등) ---
+  # 평소 기동되지 않음. docker compose run --rm scripts <command>
+  scripts:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile
+    working_dir: /workspace
+    profiles: ["tools"]
+    volumes:
+      - ./:/workspace
+    environment:
+      - PYTHONUNBUFFERED=1
+
+volumes:
+  postgres-data:
+  redis-data:
+  frontend-node-modules:
+  storage-data:
+  titiler-cache-data:

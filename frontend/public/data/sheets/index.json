@@ -1,0 +1,120 @@
+{
+  "sheets": [
+    {
+      "code": "37708034",
+      "name": "안양",
+      "region": "수도권북부",
+      "bbox": [
+        127.8249999967686,
+        37.649999999476115,
+        127.85000000596474,
+        37.67500000272221
+      ],
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              127.8250000042345,
+              37.65000000358123
+            ],
+            [
+              127.8249999967686,
+              37.6750000025389
+            ],
+            [
+              127.84999999735282,
+              37.67500000272221
+            ],
+            [
+              127.85000000596474,
+              37.649999999476115
+            ],
+            [
+              127.8250000042345,
+              37.65000000358123
+            ]
+          ]
+        ]
+      },
+      "area_km2": 6.131,
+      "review_status": "pending",
+      "reviewer": null,
+      "reviewed_at": null,
+      "task_id": "task-anyang-2024-001",
+      "models": [
+        "building",
+        "road"
+      ],
+      "compare_type": "image-image",
+      "standard_resource_id": 1001,
+      "compare_resource_id": 1002,
+      "f1_score": null,
+      "precision": null,
+      "recall": null,
+      "total_detections": 148,
+      "reviewed_detections": 0,
+      "tp_count": 0,
+      "fp_count": 0,
+      "fn_count": 0
+    },
+    {
+      "code": "37708024",
+      "name": "도엽-37708024",
+      "region": "수도권북부",
+      "bbox": [
+        127.8249999967686,
+        37.6750000025389,
+        127.85000000454036,
+        37.70000000102542
+      ],
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              127.8249999967686,
+              37.6750000025389
+            ],
+            [
+              127.8249999991933,
+              37.69999999651897
+            ],
+            [
+              127.85000000454036,
+              37.70000000102542
+            ],
+            [
+              127.84999999735282,
+              37.67500000272221
+            ],
+            [
+              127.8249999967686,
+              37.6750000025389
+            ]
+          ]
+        ]
+      },
+      "area_km2": 6.129,
+      "review_status": "pending",
+      "reviewer": null,
+      "reviewed_at": null,
+      "task_id": "task-anyang-2024-001",
+      "models": [
+        "building",
+        "road"
+      ],
+      "compare_type": "image-image",
+      "standard_resource_id": 1001,
+      "compare_resource_id": 1002,
+      "f1_score": null,
+      "precision": null,
+      "recall": null,
+      "total_detections": 103,
+      "reviewed_detections": 0,
+      "tp_count": 0,
+      "fp_count": 0,
+      "fn_count": 0
+    }
+  ]
+}
