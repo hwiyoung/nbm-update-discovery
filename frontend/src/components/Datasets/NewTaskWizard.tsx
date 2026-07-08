@@ -1,321 +1,102 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Wand2 } from "lucide-react";
-import {
-  Button,
-  Modal,
-  ModalDescription,
-  Tabs,
-} from "@/components/Common";
-import type { TabItem } from "@/components/Common";
-import { useDatasetsStore, type WizardStep } from "@/stores/datasetsStore";
-import type { PendingDataset, PendingUpload } from "@/stores/datasetsStore";
-import { useTasksStore } from "@/stores/tasksStore";
-import {
-  createTask,
-  getDatasetOverlapRatio,
-  getDatasetPreflightMetadata,
-  registerFromServerPath,
-} from "@/api/client";
-import { DEFAULT_DATASET_PLATFORM } from "@/utils/constants";
-import { WizardStepResource } from "./WizardStepResource";
-import { WizardStepMeta } from "./WizardStepMeta";
+import { ChevronLeft, ChevronRight, MapPin } from "lucide-react";
 import toast from "react-hot-toast";
+import { Button, Modal, ModalDescription } from "@/components/Common";
+import { useDatasetsStore, type WizardStep } from "@/stores/datasetsStore";
+import { useSheetsStore } from "@/stores/sheetsStore";
+import { useTasksStore } from "@/stores/tasksStore";
+import { createTask } from "@/api/client";
+import {
+  buildOrthoGroupsFromDatasets,
+  selectedOrthoPairs,
+  summarizeOrthoGroups,
+} from "@/utils/mapProject";
+import { MapProjectStepper } from "./mapwizard/Stepper";
+import { OrthoMap } from "./mapwizard/OrthoMap";
+import { StepDraw } from "./mapwizard/StepDraw";
+import { StepReview } from "./mapwizard/StepReview";
+import { StepMeta } from "./mapwizard/StepMeta";
 
-const STEPS: TabItem<WizardStep>[] = [
-  { value: "resource", label: "1. 과년도 · 당해년도" },
-  { value: "meta", label: "2. 작업 메타 · 등록 요약" },
-];
+const STEP_ORDER: WizardStep[] = ["draw", "review", "meta"];
 
 /**
- * 신규 변화탐지 작업 위저드 — 단일 흐름.
+ * 지도 기반 신규 변화탐지 작업 위저드.
  *
- * 단계:
- *   1. 자원 선택: 과년도·당해년도 영상을 한 페이지(좌·우 분할)에서 동시 선택
- *      - 기존 데이터셋에서 선택 또는 서버 파일 탐색기로 신규 영상 선택
- *   2. 작업 메타 + 등록 요약: 좌측 메타 입력 (작업명·설명·객체·자동실행),
- *      우측 실시간 요약 (자원 카드) → "등록" → registerFromServerPath +
- *      createTask + (옵션) Celery enqueue. 실행 상태는 프로젝트 상세보기에서 확인.
+ * 흐름:
+ *   1. 지도에서 bbox 지정
+ *   2. bbox 와 교차하는 기존 정사영상 자동 매칭 및 당해년도 포함/제외 검토
+ *   3. 작업명·객체·자동실행 설정 후 선택 조합별 task 등록
  */
 export function NewTaskWizard() {
-  const open = useDatasetsStore((s) => s.wizardOpen);
-  const close = useDatasetsStore((s) => s.closeWizard);
-  const step = useDatasetsStore((s) => s.wizardStep);
-  const setStep = useDatasetsStore((s) => s.setWizardStep);
-  const selection = useDatasetsStore((s) => s.wizardSelection);
-  const setSelection = useDatasetsStore((s) => s.setWizardSelection);
-  const datasets = useDatasetsStore((s) => s.datasets);
-  const appendDataset = useDatasetsStore((s) => s.appendDataset);
-  const setPendingTaskId = useDatasetsStore((s) => s.setPendingTaskId);
-  const addPendingUpload = useDatasetsStore((s) => s.addPendingUpload);
-  const updatePendingUpload = useDatasetsStore((s) => s.updatePendingUpload);
-  const removePendingUpload = useDatasetsStore((s) => s.removePendingUpload);
-  const appendTask = useTasksStore((s) => s.appendTask);
+  const open = useDatasetsStore((state) => state.wizardOpen);
+  const close = useDatasetsStore((state) => state.closeWizard);
+  const step = useDatasetsStore((state) => state.wizardStep);
+  const setStep = useDatasetsStore((state) => state.setWizardStep);
+  const selection = useDatasetsStore((state) => state.wizardSelection);
+  const setSelection = useDatasetsStore((state) => state.setWizardSelection);
+  const setDrawnBBox = useDatasetsStore((state) => state.setWizardDrawnBBox);
+  const setGroups = useDatasetsStore((state) => state.setWizardGroups);
+  const setHovered = useDatasetsStore((state) => state.setWizardHoveredOrtho);
+  const toggleCurrent = useDatasetsStore((state) => state.toggleWizardCurrent);
+  const datasets = useDatasetsStore((state) => state.datasets);
+  const datasetsLoading = useDatasetsStore((state) => state.loading);
+  const loadDatasets = useDatasetsStore((state) => state.loadDatasets);
+  const appendTask = useTasksStore((state) => state.appendTask);
+  const setPendingTaskId = useDatasetsStore((state) => state.setPendingTaskId);
+  const regions = useSheetsStore((state) => state.regions);
+  const regionsLoading = useSheetsStore((state) => state.regionsLoading);
+  const loadRegions = useSheetsStore((state) => state.loadRegions);
   const navigate = useNavigate();
 
-  interface PendingCreateState {
-    snap: typeof selection;
-    standardId: number;
-    compareId: number;
-  }
+  const [drawing, setDrawing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [overlap, setOverlap] = useState<{
-    key: string;
-    loading: boolean;
-    ratio: number | null;
-    method: "metadata" | "sheets" | null;
-    commonSheets: string[];
-    error: string | null;
-  }>({
-    key: "",
-    loading: false,
-    ratio: null,
-    method: null,
-    commonSheets: [],
-    error: null,
-  });
-
-  const hasStandard = Boolean(
-    selection.standardId || selection.standardPending,
-  );
-  const hasCompare = Boolean(selection.compareId || selection.comparePending);
-  const hasPendingSelection = Boolean(selection.standardPending || selection.comparePending);
-  const existingPairKey =
-    selection.standardId && selection.compareId
-      ? `${selection.standardId}:${selection.compareId}`
-      : "";
 
   useEffect(() => {
-    if (!selection.standardId || !selection.compareId) {
-      setOverlap({
-        key: "",
-        loading: false,
-        ratio: null,
-        method: null,
-        commonSheets: [],
-        error: null,
-      });
-      return;
-    }
+    if (!open) return;
+    if (datasets.length === 0 && !datasetsLoading) void loadDatasets();
+    if (!regions && !regionsLoading) void loadRegions();
+  }, [
+    datasets.length,
+    datasetsLoading,
+    loadDatasets,
+    loadRegions,
+    open,
+    regions,
+    regionsLoading,
+  ]);
 
-    let cancelled = false;
-    const key = `${selection.standardId}:${selection.compareId}`;
-    setOverlap({
-      key,
-      loading: true,
-      ratio: null,
-      method: null,
-      commonSheets: [],
-      error: null,
-    });
+  useEffect(() => {
+    if (!open || !selection.drawnBBox) return;
+    const groups = buildOrthoGroupsFromDatasets(datasets, selection.drawnBBox);
+    setGroups(groups);
+  }, [datasets, open, selection.drawnBBox, setGroups]);
 
-    getDatasetPreflightMetadata(selection.standardId, selection.compareId)
-      .then((result) => {
-        if (cancelled) return;
-        setOverlap({
-          key,
-          loading: false,
-          ratio: result.overlap_ratio,
-          method: "metadata",
-          commonSheets: [],
-          error: null,
-        });
-      })
-      .catch(async (err: unknown) => {
-        try {
-          const fallback = await getDatasetOverlapRatio(selection.standardId!, selection.compareId!);
-          if (cancelled) return;
-          setOverlap({
-            key,
-            loading: false,
-            ratio: fallback.ratio,
-            method: "sheets",
-            commonSheets: fallback.common_sheets,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        } catch (fallbackErr: unknown) {
-          if (cancelled) return;
-          setOverlap({
-            key,
-            loading: false,
-            ratio: null,
-            method: null,
-            commonSheets: [],
-            error: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
-          });
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selection.standardId, selection.compareId]);
+  const summary = useMemo(
+    () => summarizeOrthoGroups(selection.groups),
+    [selection.groups],
+  );
+  const pairs = useMemo(
+    () => selectedOrthoPairs(selection.groups),
+    [selection.groups],
+  );
+  const readyDatasetCount = useMemo(
+    () => datasets.filter((dataset) => dataset.status === "ready").length,
+    [datasets],
+  );
 
   const canNext = (() => {
-    if (step === "resource") {
-      if (!hasStandard || !hasCompare) return false;
-      if (existingPairKey && overlap.key === existingPairKey && !overlap.loading && overlap.ratio === 0) {
-        return false;
-      }
-      return true;
-    }
-    if (step === "meta") {
-      return (
-        hasStandard &&
-        hasCompare &&
-        selection.name.trim().length > 0 &&
-        selection.models.length > 0
-      );
-    }
-    return false;
+    if (step === "draw") return Boolean(selection.drawnBBox) && summary.matchedCount > 0;
+    if (step === "review") return summary.currentCount > 0 && pairs.length > 0;
+    return (
+      selection.name.trim().length > 0 &&
+      selection.models.length > 0 &&
+      pairs.length > 0 &&
+      pairs.every((pair) => pair.commonSheets.length > 0)
+    );
   })();
 
-  const onPrev = () => {
-    if (step === "meta") setStep("resource");
-  };
-
-  const validatePending = (
-    p: PendingDataset,
-    side: string,
-  ): string | null => {
-    if (!p.display_name.trim()) return `${side} 자원의 표시 이름을 입력하세요`;
-    const y = Number(p.taken_year);
-    if (!Number.isInteger(y) || y < 1990 || y > 2100)
-      return `${side} 자원의 촬영 연도를 1990~2100 사이로 입력하세요`;
-    return null;
-  };
-
-  const yearToRange = (year: string): { start: string; end: string } => ({
-    start: new Date(`${year}-01-01T00:00:00Z`).toISOString(),
-    end: new Date(`${year}-12-31T23:59:59Z`).toISOString(),
-  });
-
-  const onSubmitFinal = async () => {
-    if (selection.standardPending) {
-      const err = validatePending(selection.standardPending, "과년도");
-      if (err) {
-        toast.error(err);
-        return;
-      }
-    }
-    if (selection.comparePending) {
-      const err = validatePending(selection.comparePending, "당해년도");
-      if (err) {
-        toast.error(err);
-        return;
-      }
-    }
-
-    const snapshot = selection;
-    setSubmitting(true);
-    close();
-    void runSubmission(snapshot);
-  };
-
-  const runSubmission = async (
-    snap: typeof selection,
-  ): Promise<void> => {
-    let stdId = snap.standardId;
-    let cmpId = snap.compareId;
-
-    const registerOne = async (
-      pending: PendingDataset,
-      side: "standard" | "compare",
-      sideLabel: string,
-    ) => {
-      const uploadId = `up-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
-      addPendingUpload({
-        id: uploadId,
-        display_name: pending.display_name || pending.source_name,
-        side,
-        phase: "analyzing",
-        percent: 30,
-        message: `${sideLabel}영상 좌표 분석 중…`,
-      });
-      try {
-        const range = yearToRange(pending.taken_year);
-        const ds = await registerFromServerPath({
-          server_path: pending.server_path,
-          display_name: pending.display_name,
-          platform: DEFAULT_DATASET_PLATFORM,
-          taken_start_at: range.start,
-          taken_end_at: range.end,
-        });
-        if (ds.status === "failed") {
-          updatePendingUpload(uploadId, {
-            phase: "error",
-            error: `${sideLabel}영상 처리 실패`,
-          });
-          throw new Error(`${sideLabel}영상 처리 실패: ${ds.thumbnail_url ?? "원인 미상"}`);
-        }
-        appendDataset(ds);
-        updatePendingUpload(uploadId, { phase: "done", percent: 100 });
-        window.setTimeout(() => removePendingUpload(uploadId), 8000);
-        return ds.id;
-      } catch (err) {
-        updatePendingUpload(uploadId, {
-          phase: "error",
-          error: err instanceof Error ? err.message : String(err),
-        } satisfies Partial<PendingUpload>);
-        throw err;
-      }
-    };
-
-    try {
-      if (snap.standardPending) {
-        stdId = await registerOne(snap.standardPending, "standard", "과년도");
-      }
-      if (snap.comparePending) {
-        cmpId = await registerOne(snap.comparePending, "compare", "당해년도");
-      }
-
-      if (!stdId || !cmpId) {
-        throw new Error("과년도·당해년도 자원이 모두 필요합니다");
-      }
-
-      await createFinalTask(
-        {
-          snap,
-          standardId: stdId,
-          compareId: cmpId,
-        },
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(msg);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const createFinalTask = async (pending: PendingCreateState): Promise<void> => {
-    try {
-      const task = await createTask({
-        name: pending.snap.name,
-        description: pending.snap.description,
-        models: pending.snap.models,
-        compare_type: "image-image",
-        standard_resource_id: pending.standardId,
-        compare_resource_id: pending.compareId,
-        auto_run: pending.snap.autoRun,
-      });
-
-      appendTask(task);
-      if (pending.snap.autoRun) {
-        setPendingTaskId(task.id);
-      }
-      navigate(`/tasks/${task.id}`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(msg);
-    }
-  };
-
-  const onNext = async () => {
-    if (step === "resource") setStep("meta");
-    else if (step === "meta") await onSubmitFinal();
-  };
-
+  const currentIndex = STEP_ORDER.indexOf(step);
   const isFinal = step === "meta";
   const primaryLabel = isFinal
     ? selection.autoRun
@@ -323,152 +104,203 @@ export function NewTaskWizard() {
       : "등록"
     : "다음";
 
+  const onPrev = () => {
+    if (currentIndex <= 0) return;
+    setStep(STEP_ORDER[currentIndex - 1]!);
+  };
+
+  const onNext = async () => {
+    if (isFinal) {
+      await submitTasks();
+      return;
+    }
+    setStep(STEP_ORDER[currentIndex + 1]!);
+  };
+
+  const clearArea = () => {
+    setDrawing(false);
+    setDrawnBBox(null);
+    setStep("draw");
+  };
+
+  const submitTasks = async () => {
+    const validPairs = pairs.filter((pair) => pair.commonSheets.length > 0);
+    if (validPairs.length === 0) {
+      toast.error("공통 도엽이 있는 영상 조합이 필요합니다");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const created = [];
+      for (const [index, pair] of validPairs.entries()) {
+        const task = await createTask({
+          name:
+            validPairs.length === 1
+              ? selection.name.trim()
+              : `${selection.name.trim()} · ${pair.past.id}-${pair.current.id}`,
+          description: selection.description,
+          models: selection.models,
+          compare_type: "image-image",
+          standard_resource_id: pair.past.datasetId,
+          compare_resource_id: pair.current.datasetId,
+          auto_run: selection.autoRun,
+        });
+        appendTask(task);
+        if (index === 0 && selection.autoRun) setPendingTaskId(task.id);
+        created.push(task);
+      }
+      close();
+      if (created.length > 0) {
+        toast.success(
+          created.length === 1
+            ? "작업이 등록되었습니다"
+            : `${created.length.toLocaleString("ko-KR")}개 작업이 등록되었습니다`,
+        );
+        navigate(`/tasks/${created[0]!.id}`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <Modal
       open={open}
-      onOpenChange={(o) => {
-        if (!o) close();
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && !submitting) close();
       }}
-      title="신규 변화탐지 작업"
-      icon={<Wand2 size={20} />}
-      width={1000}
+      title={
+        <div className="flex items-center gap-2">
+          <span>지도 기반 프로젝트 생성</span>
+          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-black text-slate-500">
+            신규 변화탐지 작업
+          </span>
+        </div>
+      }
+      icon={<MapPin size={20} />}
+      width="min(1280px, calc(100vw - 32px))"
+      blockDismiss={submitting}
       footer={
-        <>
-          <Button variant="ghost" onClick={close} disabled={submitting}>
-            취소
-          </Button>
-          {step !== "resource" ? (
-            <Button variant="secondary" onClick={onPrev} disabled={submitting}>
-              이전
+        <div className="flex w-full items-center justify-between gap-4">
+          <FooterSummary step={step} summaryText={footerSummaryText(step, summary)} />
+          <div className="flex items-center justify-end gap-3">
+            <Button variant="ghost" onClick={close} disabled={submitting}>
+              취소
             </Button>
-          ) : null}
-          <Button variant="primary" onClick={onNext} disabled={!canNext || submitting}>
-            {primaryLabel}
-          </Button>
-        </>
+            {currentIndex > 0 ? (
+              <Button
+                variant="secondary"
+                onClick={onPrev}
+                disabled={submitting}
+                leftIcon={<ChevronLeft size={15} />}
+              >
+                이전
+              </Button>
+            ) : null}
+            <Button
+              variant="primary"
+              onClick={onNext}
+              disabled={!canNext || submitting}
+              rightIcon={!isFinal ? <ChevronRight size={15} /> : undefined}
+            >
+              {submitting ? "등록 중..." : primaryLabel}
+            </Button>
+          </div>
+        </div>
       }
     >
       <ModalDescription>
-        서버 영상 선택 또는 기존 자원 + 작업 메타 등록을 한 흐름으로
+        지도에서 영역을 지정하고 겹치는 정사영상을 검토한 뒤 변화탐지 작업을 등록합니다.
       </ModalDescription>
 
-      <Tabs items={STEPS} value={step} onChange={() => {}} className="mb-4" />
-
-      {step === "resource" ? (
-        <>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-md border border-slate-100 bg-slate-50/50 p-3 min-h-[420px] flex flex-col">
-              <WizardStepResource
-                side="standard"
-                label="과년도"
-                hint="과년도 정사영상을 선택하세요."
-                selectedId={selection.standardId}
-                onSelectExisting={(id) =>
-                  setSelection({ standardId: id, standardPending: null })
-                }
-                pending={selection.standardPending}
-                onPending={(p) =>
-                  setSelection({
-                    standardPending: p,
-                    standardId: p ? null : selection.standardId,
-                  })
-                }
-                excludeId={selection.compareId}
-              />
-            </div>
-            <div className="rounded-md border border-slate-100 bg-slate-50/50 p-3 min-h-[420px] flex flex-col">
-              <WizardStepResource
-                side="compare"
-                label="당해년도"
-                hint="당해년도 정사영상을 선택하세요."
-                selectedId={selection.compareId}
-                onSelectExisting={(id) =>
-                  setSelection({ compareId: id, comparePending: null })
-                }
-                pending={selection.comparePending}
-                onPending={(p) =>
-                  setSelection({
-                    comparePending: p,
-                    compareId: p ? null : selection.compareId,
-                  })
-                }
-                excludeId={selection.standardId}
-              />
-            </div>
+      <div className="-m-6 flex h-[min(720px,calc(88vh-136px))] min-h-[620px] flex-col">
+        <MapProjectStepper step={step} />
+        <div className="flex min-h-0 flex-1">
+          <div className="min-w-0 basis-[62%] bg-slate-100">
+            <OrthoMap
+              step={step}
+              datasets={datasets}
+              regionData={regions}
+              drawnBBox={selection.drawnBBox}
+              groups={selection.groups}
+              hoveredId={selection.hoveredOrthoId}
+              drawing={drawing}
+              onDrawn={(bbox) => {
+                setDrawnBBox(bbox);
+                setStep("draw");
+              }}
+              onDrawingChange={setDrawing}
+              onHover={setHovered}
+              onToggleCurrent={toggleCurrent}
+            />
           </div>
-          <OverlapStatusCard
-            loading={overlap.loading}
-            ratio={overlap.ratio}
-            error={overlap.error}
-            hasBoth={hasStandard && hasCompare}
-            hasPending={hasPendingSelection}
-          />
-        </>
-      ) : null}
 
-      {step === "meta" ? (
-        <WizardStepMeta
-          selection={selection}
-          datasets={datasets}
-          overlapRatio={overlap.ratio}
-          overlapLoading={overlap.loading}
-          hasPendingSelection={hasPendingSelection}
-          onChange={(partial) => setSelection(partial)}
-        />
-      ) : null}
+          <aside className="min-w-[380px] basis-[38%] border-l border-slate-200 bg-white overflow-y-auto custom-scrollbar">
+            {step === "draw" ? (
+              <StepDraw
+                drawnBBox={selection.drawnBBox}
+                summary={summary}
+                readyDatasetCount={readyDatasetCount}
+                groups={selection.groups}
+                drawing={drawing}
+                onStartDrawing={() => setDrawing(true)}
+                onClear={clearArea}
+              />
+            ) : null}
+            {step === "review" ? (
+              <StepReview
+                groups={selection.groups}
+                summary={summary}
+                hoveredId={selection.hoveredOrthoId}
+                onHover={setHovered}
+                onToggleCurrent={toggleCurrent}
+              />
+            ) : null}
+            {step === "meta" ? (
+              <StepMeta
+                selection={selection}
+                summary={summary}
+                pairs={pairs}
+                onChange={setSelection}
+              />
+            ) : null}
+          </aside>
+        </div>
+      </div>
     </Modal>
   );
 }
 
-function OverlapStatusCard({
-  loading,
-  ratio,
-  error,
-  hasBoth,
-  hasPending,
+function FooterSummary({
+  step,
+  summaryText,
 }: {
-  loading: boolean;
-  ratio: number | null;
-  error: string | null;
-  hasBoth: boolean;
-  hasPending: boolean;
+  step: WizardStep;
+  summaryText: string | null;
 }) {
-  if (!hasBoth) {
-    return (
-      <div className="mt-3 rounded-md border border-slate-100 bg-white px-3 py-2 text-xs text-slate-500">
-        과년도·당해년도 영상을 선택하면 중첩률이 표시됩니다.
-      </div>
-    );
-  }
-  if (hasPending) {
-    return (
-      <div className="mt-3 rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-        새 서버 영상은 등록 후 중첩률을 계산합니다.
-      </div>
-    );
-  }
-  if (loading) {
-    return (
-      <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">
-        중첩률 계산 중...
-      </div>
-    );
-  }
-  if (ratio == null) {
-    return (
-      <div className="mt-3 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">
-        중첩률 계산 실패{error ? `: ${error}` : ""}
-      </div>
-    );
+  if (step === "draw" || !summaryText) {
+    return <div className="min-w-0 flex-1" />;
   }
   return (
-    <div className="mt-3 rounded-md border border-slate-100 bg-white px-3 py-2 text-xs text-slate-600">
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-bold text-slate-700">중첩률</span>
-        <span className={ratio <= 0 ? "font-black text-red-600" : "font-black text-slate-900"}>
-          {(ratio * 100).toFixed(1)}%
-        </span>
-      </div>
+    <div className="min-w-0 flex-1 truncate text-left text-xs font-black text-slate-600">
+      {summaryText}
     </div>
   );
+}
+
+function footerSummaryText(
+  step: WizardStep,
+  summary: ReturnType<typeof summarizeOrthoGroups>,
+): string | null {
+  if (step === "draw" || summary.matchedCount === 0) return null;
+  return [
+    `정사영상 ${summary.matchedCount.toLocaleString("ko-KR")}장`,
+    `과년도 ${summary.pastCount.toLocaleString("ko-KR")}`,
+    summary.region,
+    `${summary.areaKm2.toFixed(2)}㎢`,
+    `중첩 ${Math.round(summary.overlap * 100)}%`,
+  ].join(" · ");
 }

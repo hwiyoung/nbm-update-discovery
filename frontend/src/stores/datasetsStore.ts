@@ -1,14 +1,16 @@
 import { useMemo } from "react";
 import { create } from "zustand";
 import type { Dataset, DatasetFilter, ObjectCategory } from "@/types";
+import type { BBox, OrthoGroup } from "@/types/mapProject";
 import { deleteDataset as apiDeleteDataset, listDatasets } from "@/api/client";
+import { toggleCurrentInGroups } from "@/utils/mapProject";
 
 /**
  * /datasets 화면 + 위저드 상태.
  * - filter selector → 카드 그리드 동시 반응
  * - 위저드 3단계 (자원 1/2 + 메타 3)
  */
-export type WizardStep = "resource" | "meta";
+export type WizardStep = "draw" | "review" | "meta";
 
 /**
  * 위저드 단계에서 사용자가 ServerFileBrowser 로 선택한 서버 측 파일.
@@ -51,6 +53,12 @@ export interface PendingUpload {
 }
 
 export interface WizardSelection {
+  /** 지도에서 지정한 변화탐지 대상 bbox (EPSG:4326). */
+  drawnBBox: BBox | null;
+  /** drawnBBox 와 교차하는 과년도 1 : 당해년도 N 매칭 그룹. */
+  groups: OrthoGroup[];
+  /** 지도 footprint / 테이블 hover 동기화용. */
+  hoveredOrthoId: string | null;
   /** 기존 자원 선택. pending 과 상호 배타 (자원 1개당 둘 중 하나). */
   standardId: number | null;
   compareId: number | null;
@@ -96,6 +104,10 @@ interface DatasetsState {
   closeWizard: () => void;
   setWizardStep: (step: WizardStep) => void;
   setWizardSelection: (partial: Partial<WizardSelection>) => void;
+  setWizardDrawnBBox: (bbox: BBox | null) => void;
+  setWizardGroups: (groups: OrthoGroup[]) => void;
+  setWizardHoveredOrtho: (id: string | null) => void;
+  toggleWizardCurrent: (pastId: string, currentId: string) => void;
   resetWizard: () => void;
 
   openUpload: () => void;
@@ -127,6 +139,9 @@ const initialFilter: DatasetFilter = {
 };
 
 const initialWizard: WizardSelection = {
+  drawnBBox: null,
+  groups: [],
+  hoveredOrthoId: null,
   standardId: null,
   compareId: null,
   standardPending: null,
@@ -145,7 +160,7 @@ export const useDatasetsStore = create<DatasetsState>((set) => ({
   error: null,
 
   wizardOpen: false,
-  wizardStep: "resource",
+  wizardStep: "draw",
   wizardSelection: { ...initialWizard },
 
   uploadOpen: false,
@@ -192,7 +207,7 @@ export const useDatasetsStore = create<DatasetsState>((set) => ({
   openWizard: () =>
     set({
       wizardOpen: true,
-      wizardStep: "resource",
+      wizardStep: "draw",
       wizardSelection: { ...initialWizard },
     }),
   closeWizard: () => set({ wizardOpen: false }),
@@ -201,8 +216,36 @@ export const useDatasetsStore = create<DatasetsState>((set) => ({
     set((state) => ({
       wizardSelection: { ...state.wizardSelection, ...partial },
     })),
+  setWizardDrawnBBox: (drawnBBox) =>
+    set((state) => ({
+      wizardSelection: {
+        ...state.wizardSelection,
+        drawnBBox,
+        groups: [],
+        hoveredOrthoId: null,
+      },
+    })),
+  setWizardGroups: (groups) =>
+    set((state) => ({
+      wizardSelection: { ...state.wizardSelection, groups },
+    })),
+  setWizardHoveredOrtho: (hoveredOrthoId) =>
+    set((state) => ({
+      wizardSelection: { ...state.wizardSelection, hoveredOrthoId },
+    })),
+  toggleWizardCurrent: (pastId, currentId) =>
+    set((state) => ({
+      wizardSelection: {
+        ...state.wizardSelection,
+        groups: toggleCurrentInGroups(
+          state.wizardSelection.groups,
+          pastId,
+          currentId,
+        ),
+      },
+    })),
   resetWizard: () =>
-    set({ wizardSelection: { ...initialWizard }, wizardStep: "resource" }),
+    set({ wizardSelection: { ...initialWizard }, wizardStep: "draw" }),
 
   openUpload: () => set({ uploadOpen: true }),
   closeUpload: () => set({ uploadOpen: false }),
