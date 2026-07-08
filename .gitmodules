@@ -1,0 +1,4 @@
+[submodule "innopam-PM2022004-digital"]
+	path = innopam-PM2022004-digital
+	url = https://github.com/innopam/innopam-PM2022004-digital.git
+	branch = main

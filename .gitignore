@@ -56,7 +56,6 @@ coverage/
 # --- Project-specific ---
 .codex-backups/
 exports/
-innopam-PM2022004-digital/
 backend/storage/
 backend/uploads/
 frontend/public/data/regions/sheets-index.geojson
