@@ -641,7 +641,7 @@ CLAUDE.md 를 먼저 읽어주세요. docs/PROGRESS.md 를 읽고 이정표 4가
 다음 상태에 도달:
 - 백엔드 쓰기 API 모두 구현 (검수 결과 영속화)
 - Celery + Redis 통합 (변화탐지 작업 큐)
-- 모델 호출 wrapper (engines/change-detection/) — mock 또는 실 모델
+- 모델 호출 wrapper — 실제 엔진은 `innopam-PM2022004-digital` submodule, legacy mock은 `engines/change-detection/run.py`
 - 위저드 등록 후 진행률 폴링 → 결과 도엽별 분할 → DB 적재
 - 검수 결과 SHP/DXF/PDF Export
 - End-to-end 흐름 검증
@@ -691,13 +691,14 @@ backend/app/api/tasks.py:
 
 docker-compose.yml 에 celery-worker 컨테이너 추가.
 
-#### 3. engines/change-detection/
+#### 3. 변화탐지 엔진
 
-- engines/change-detection/Dockerfile (실 모델 환경 또는 mock)
-- engines/change-detection/run.py — 모델 호출 인터페이스
+- 실제 엔진 소스: `innopam-PM2022004-digital` submodule
+- Docker 런타임 경로: `/engines/pm`
+- legacy mock 인터페이스: `engines/change-detection/run.py`
   - 입력: 정사영상 2장 경로 + 객체 카테고리 (building or road)
   - 출력: 변화 폴리곤 GeoJSON (EPSG:5186)
-  - **1차 PoC: 실 모델 통합 시도. 막히면 즉시 mock으로 우회** (가짜 폴리곤 생성)
+  - **mock 우회 시에만 사용** (가짜 폴리곤 생성)
 
 mock 우회 시: 입력 정사영상의 bbox 안에 무작위 폴리곤 100~150개 생성. 변화 유형 비율은 PROJECT_BRIEF 안양 기준.
 

@@ -194,13 +194,13 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod exec celery-engin
 도로 모델 확인:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod exec celery-engine-worker sh -lc 'test -s /engines/change-detection/Road_CD/workspace/model/best_road.pth'
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec celery-engine-worker sh -lc 'test -s /engines/pm/02_Road_CD/workspace/model/best_road.pth'
 ```
 
 건물 모델 확인:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod exec celery-engine-worker sh -lc 'test -s /engines/change-detection/Building_CD/workspace/model/best_building.pth'
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec celery-engine-worker sh -lc 'test -s /engines/pm/04_Building_CD/workspace/model/best_building.pth'
 ```
 
 위 두 명령은 출력 없이 종료되면 정상입니다.
