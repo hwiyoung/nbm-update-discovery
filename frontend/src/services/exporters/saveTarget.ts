@@ -64,12 +64,17 @@ export function isExportSaveCanceled(err: unknown): boolean {
   return err instanceof ExportSaveCanceledError;
 }
 
+export function canUseNativeSavePicker(): boolean {
+  return typeof (window as WindowWithSavePicker).showSaveFilePicker === "function"
+    && window.isSecureContext;
+}
+
 export async function createExportSaveTarget(
   suggestedName: string,
   kind: ExportKind,
 ): Promise<ExportSaveTarget> {
   const picker = (window as WindowWithSavePicker).showSaveFilePicker;
-  if (typeof picker === "function" && window.isSecureContext) {
+  if (canUseNativeSavePicker() && picker) {
     try {
       const handle = await picker({
         suggestedName,
