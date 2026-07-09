@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
   CalendarDays,
+  ChevronDown,
   Download,
   Eye,
   FileText,
-  FolderOpen,
   Layers,
   Loader2,
   Map as MapIcon,
@@ -21,6 +22,7 @@ import {
   canUseNativeSavePicker,
   createExportSaveTarget,
   type ExportKind,
+  type ExportSaveTarget,
   getDefaultTaskExportFilename,
   isExportSaveCanceled,
 } from "@/services/exporters/saveTarget";
@@ -290,60 +292,171 @@ export function TaskRow({ task, totalDetections }: TaskRowProps) {
 }
 
 // ============================================================
-// 내보내기 모달 — 폴리곤 SHP / DXF, 리포트 PDF
+// 내보내기 드롭다운 — 형식 선택 후 OS 저장 탐색기 호출
 // ============================================================
 export function ExportMenu({ task }: { task: Task }) {
   const [open, setOpen] = useState(false);
+  const [busyKind, setBusyKind] = useState<ExportKind | null>(null);
+  const [fallbackKind, setFallbackKind] = useState<ExportKind | null>(null);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const disabled = task.sheet_codes.length === 0;
+
+  const updateMenuPosition = () => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const menuWidth = 248;
+    const left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth));
+    const top = Math.min(window.innerHeight - 260, rect.bottom + 6);
+    setMenuPosition({ top: Math.max(8, top), left });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    updateMenuPosition();
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (buttonRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  const exportWithNativePicker = async (kind: ExportKind) => {
+    setOpen(false);
+    const tid = `export-${task.id}-${kind}`;
+    try {
+      const saveTarget = await createExportSaveTarget(
+        getDefaultTaskExportFilename(task, kind),
+        kind,
+      );
+      setBusyKind(kind);
+      toast.loading(`${EXPORT_META[kind].label} 생성 중…`, { id: tid });
+      const stats = await executeTaskExport(task.id, kind, saveTarget);
+      showExportSuccess(kind, stats, tid);
+    } catch (err) {
+      if (isExportSaveCanceled(err)) toast.dismiss(tid);
+      else toast.error(err instanceof Error ? err.message : "내보내기 실패", { id: tid });
+    } finally {
+      setBusyKind(null);
+    }
+  };
+
+  const onChoose = (kind: ExportKind) => {
+    setOpen(false);
+    if (canUseNativeSavePicker()) {
+      void exportWithNativePicker(kind);
+      return;
+    }
+    setFallbackKind(kind);
+  };
 
   return (
     <>
       <button
+        ref={buttonRef}
         type="button"
-        disabled={disabled}
-        onClick={() => setOpen(true)}
+        disabled={disabled || busyKind !== null}
+        onClick={() => setOpen((value) => !value)}
         title={disabled ? "내보낼 객체가 없습니다" : "내보내기"}
         className="inline-flex items-center gap-1 h-6 px-2 rounded text-[11px] font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        <Download size={11} />
+        {busyKind ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
         내보내기
+        <ChevronDown size={11} />
       </button>
-      <ExportDialog task={task} open={open} onClose={() => setOpen(false)} />
+      {open
+        ? createPortal(
+          <div
+            ref={menuRef}
+            className="fixed z-[1200] w-[248px] rounded-md border border-slate-200 bg-white py-1 shadow-xl"
+            style={{ top: menuPosition.top, left: menuPosition.left }}
+          >
+            {(Object.keys(EXPORT_META) as ExportKind[]).map((kind) => (
+              <ExportItem
+                key={kind}
+                kind={kind}
+                onClick={() => onChoose(kind)}
+              />
+            ))}
+          </div>,
+          document.body,
+        )
+        : null}
+      <ExportFallbackDialog
+        task={task}
+        kind={fallbackKind}
+        open={fallbackKind !== null}
+        onClose={() => setFallbackKind(null)}
+      />
     </>
   );
 }
 
-function ExportDialog({
+function ExportItem({
+  kind,
+  onClick,
+}: {
+  kind: ExportKind;
+  onClick: () => void;
+}) {
+  const meta = EXPORT_META[kind];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full px-3 py-2 text-left hover:bg-slate-50 transition-colors flex items-start gap-2"
+    >
+      <span className="mt-0.5 text-blue-600 shrink-0">{meta.icon}</span>
+      <span className="min-w-0">
+        <span className="block text-xs font-bold text-slate-700">
+          {meta.label}
+          <span className="ml-1 font-normal text-slate-400">{meta.ext}</span>
+        </span>
+        <span className="block text-[10px] text-slate-400">{meta.sub}</span>
+      </span>
+    </button>
+  );
+}
+
+function ExportFallbackDialog({
   task,
+  kind,
   open,
   onClose,
 }: {
   task: Task;
+  kind: ExportKind | null;
   open: boolean;
   onClose: () => void;
 }) {
-  const [kind, setKind] = useState<ExportKind>("shp");
-  const [filename, setFilename] = useState(getDefaultTaskExportFilename(task, "shp"));
+  const selectedKind = kind ?? "shp";
+  const [filename, setFilename] = useState(getDefaultTaskExportFilename(task, selectedKind));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const nativeSave = canUseNativeSavePicker();
 
   useEffect(() => {
-    if (!open) return;
-    setKind("shp");
-    setFilename(getDefaultTaskExportFilename(task, "shp"));
+    if (!open || !kind) return;
+    setFilename(getDefaultTaskExportFilename(task, kind));
     setBusy(false);
     setError(null);
-  }, [open, task.id, task.name]);
-
-  const selectKind = (next: ExportKind) => {
-    setKind(next);
-    setFilename(getDefaultTaskExportFilename(task, next));
-    setError(null);
-  };
+  }, [open, kind, task.id, task.name]);
 
   const submit = async () => {
-    if (busy) return;
+    if (busy || !kind) return;
     const normalized = normalizeExportFilename(filename, kind);
     if (!normalized) {
       setError("파일명을 입력하세요");
@@ -355,31 +468,8 @@ function ExportDialog({
     toast.loading(`${EXPORT_META[kind].label} 생성 중…`, { id: tid });
     try {
       const saveTarget = await createExportSaveTarget(normalized, kind);
-      const mod = await import("@/services/exporters");
-      if (kind === "shp") {
-        await mod.exportTaskAsShp(task.id, saveTarget);
-      } else if (kind === "dxf") {
-        await mod.exportTaskAsDxf(task.id, saveTarget);
-      } else if (kind === "pdf") {
-        await mod.exportTaskAsPdf(task.id, undefined, saveTarget);
-      } else {
-        const stats = await mod.exportTaskAs3dDxf(task.id, "CHANGE_DETECTION", saveTarget);
-        const nodataNote =
-          stats.objects_with_nodata.length > 0
-            ? ` — ${stats.objects_with_nodata.length}개 객체에 NoData vertex 포함`
-            : "";
-        const missingNote =
-          stats.missing_sheets.length > 0
-            ? ` (DEM 누락 도엽 ${stats.missing_sheets.length}건)`
-            : "";
-        toast.success(
-          `3D DXF 저장 요청 완료 — ${stats.total_objects}객체 / ${stats.sheets_used.length}도엽${missingNote}${nodataNote}`,
-          { id: tid, duration: 6000 },
-        );
-        onClose();
-        return;
-      }
-      toast.success(`${EXPORT_META[kind].label} 저장 요청 완료`, { id: tid });
+      const stats = await executeTaskExport(task.id, kind, saveTarget);
+      showExportSuccess(kind, stats, tid);
       onClose();
     } catch (err) {
       if (isExportSaveCanceled(err)) toast.dismiss(tid);
@@ -395,9 +485,9 @@ function ExportDialog({
       onOpenChange={(nextOpen) => {
         if (!nextOpen && !busy) onClose();
       }}
-      title="내보내기"
+      title="저장 위치 선택 불가"
       icon={<Download size={20} />}
-      width={620}
+      width={560}
       blockDismiss={busy}
       footer={
         <>
@@ -410,48 +500,30 @@ function ExportDialog({
             disabled={busy}
             leftIcon={busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
           >
-            저장
+            다운로드
           </Button>
         </>
       }
     >
-      <ModalDescription>프로젝트 결과 내보내기 저장 옵션</ModalDescription>
+      <ModalDescription>현재 접속 환경에서는 OS 저장 탐색기를 열 수 없음</ModalDescription>
 
-      <div className="space-y-5">
-        <div>
-          <div className="text-xs font-bold text-slate-500 mb-2">형식</div>
-          <div className="grid grid-cols-2 gap-2">
-            {(Object.keys(EXPORT_META) as ExportKind[]).map((item) => {
-              const meta = EXPORT_META[item];
-              const selected = item === kind;
-              return (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => selectKind(item)}
-                  disabled={busy}
-                  className={cn(
-                    "min-h-[64px] rounded-md border px-3 py-2 text-left transition-colors",
-                    "flex items-start gap-2 disabled:opacity-60 disabled:cursor-not-allowed",
-                    selected
-                      ? "border-blue-500 bg-blue-50 text-blue-700"
-                      : "border-slate-200 hover:border-blue-200 hover:bg-slate-50 text-slate-700",
-                  )}
-                >
-                  <span className={cn("mt-0.5 shrink-0", selected ? "text-blue-600" : "text-slate-400")}>
-                    {meta.icon}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-xs font-bold">{meta.label}</span>
-                    <span className="block text-[11px] text-slate-500">{meta.sub}</span>
-                  </span>
-                </button>
-              );
-            })}
+      <div className="space-y-4">
+        <div className="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          현재 브라우저 또는 접속 주소에서는 로컬 저장 탐색기를 열 수 없습니다.
+          Chrome/Edge에서 `localhost` 또는 HTTPS 주소로 접속하면 형식 선택 후 바로 저장 탐색기가 열립니다.
+        </div>
+
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+          <div className="flex items-start gap-2">
+            <span className="mt-0.5 text-blue-600 shrink-0">{EXPORT_META[selectedKind].icon}</span>
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-slate-700">{EXPORT_META[selectedKind].label}</div>
+              <div className="text-[11px] text-slate-500">{EXPORT_META[selectedKind].sub}</div>
+            </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-3">
+        <div className="grid grid-cols-[90px_minmax(0,1fr)] items-center gap-3">
           <label className="text-xs font-bold text-slate-500" htmlFor={`export-filename-${task.id}`}>
             파일명
           </label>
@@ -466,16 +538,6 @@ function ExportDialog({
             invalid={Boolean(error)}
             className="font-mono"
           />
-
-          <div className="text-xs font-bold text-slate-500">저장 위치</div>
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="h-9 flex-1 min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600 flex items-center">
-              <span className="truncate">
-                {nativeSave ? "저장 시 선택" : "브라우저 다운로드 폴더"}
-              </span>
-            </div>
-            <FolderOpen size={16} className="text-slate-400 shrink-0" />
-          </div>
         </div>
 
         {error ? (
@@ -485,6 +547,57 @@ function ExportDialog({
         ) : null}
       </div>
     </Modal>
+  );
+}
+
+interface Export3dStats {
+  total_objects: number;
+  sheets_used: string[];
+  missing_sheets: string[];
+  objects_with_nodata: string[];
+}
+
+async function executeTaskExport(
+  taskId: string,
+  kind: ExportKind,
+  saveTarget: ExportSaveTarget,
+): Promise<Export3dStats | null> {
+  const mod = await import("@/services/exporters");
+  if (kind === "shp") {
+    await mod.exportTaskAsShp(taskId, saveTarget);
+    return null;
+  }
+  if (kind === "dxf") {
+    await mod.exportTaskAsDxf(taskId, saveTarget);
+    return null;
+  }
+  if (kind === "pdf") {
+    await mod.exportTaskAsPdf(taskId, undefined, saveTarget);
+    return null;
+  }
+  return await mod.exportTaskAs3dDxf(taskId, "CHANGE_DETECTION", saveTarget);
+}
+
+function showExportSuccess(
+  kind: ExportKind,
+  stats: Export3dStats | null,
+  toastId: string,
+): void {
+  if (kind !== "dxf3d" || !stats) {
+    toast.success(`${EXPORT_META[kind].label} 저장 요청 완료`, { id: toastId });
+    return;
+  }
+  const nodataNote =
+    stats.objects_with_nodata.length > 0
+      ? ` — ${stats.objects_with_nodata.length}개 객체에 NoData vertex 포함`
+      : "";
+  const missingNote =
+    stats.missing_sheets.length > 0
+      ? ` (DEM 누락 도엽 ${stats.missing_sheets.length}건)`
+      : "";
+  toast.success(
+    `3D DXF 저장 요청 완료 — ${stats.total_objects}객체 / ${stats.sheets_used.length}도엽${missingNote}${nodataNote}`,
+    { id: toastId, duration: 6000 },
   );
 }
 
