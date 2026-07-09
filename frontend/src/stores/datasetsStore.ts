@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { Dataset, DatasetFilter, ObjectCategory } from "@/types";
 import type { BBox, OrthoGroup } from "@/types/mapProject";
 import { deleteDataset as apiDeleteDataset, listDatasets } from "@/api/client";
-import { toggleCurrentInGroups } from "@/utils/mapProject";
+import { toggleCurrentInGroups, togglePastInGroups } from "@/utils/mapProject";
 
 /**
  * /datasets 화면 + 위저드 상태.
@@ -55,7 +55,7 @@ export interface PendingUpload {
 export interface WizardSelection {
   /** 지도에서 지정한 변화탐지 대상 bbox (EPSG:4326). */
   drawnBBox: BBox | null;
-  /** drawnBBox 와 교차하는 과년도 1 : 당해년도 N 매칭 그룹. */
+  /** drawnBBox 와 교차하는 과년도/당해년도 정사영상 후보 그룹. */
   groups: OrthoGroup[];
   /** 지도 footprint / 테이블 hover 동기화용. */
   hoveredOrthoId: string | null;
@@ -107,7 +107,8 @@ interface DatasetsState {
   setWizardDrawnBBox: (bbox: BBox | null) => void;
   setWizardGroups: (groups: OrthoGroup[]) => void;
   setWizardHoveredOrtho: (id: string | null) => void;
-  toggleWizardCurrent: (pastId: string, currentId: string) => void;
+  toggleWizardPast: (pastId: string) => void;
+  toggleWizardCurrent: (currentId: string) => void;
   resetWizard: () => void;
 
   openUpload: () => void;
@@ -233,15 +234,18 @@ export const useDatasetsStore = create<DatasetsState>((set) => ({
     set((state) => ({
       wizardSelection: { ...state.wizardSelection, hoveredOrthoId },
     })),
-  toggleWizardCurrent: (pastId, currentId) =>
+  toggleWizardPast: (pastId) =>
     set((state) => ({
       wizardSelection: {
         ...state.wizardSelection,
-        groups: toggleCurrentInGroups(
-          state.wizardSelection.groups,
-          pastId,
-          currentId,
-        ),
+        groups: togglePastInGroups(state.wizardSelection.groups, pastId),
+      },
+    })),
+  toggleWizardCurrent: (currentId) =>
+    set((state) => ({
+      wizardSelection: {
+        ...state.wizardSelection,
+        groups: toggleCurrentInGroups(state.wizardSelection.groups, currentId),
       },
     })),
   resetWizard: () =>

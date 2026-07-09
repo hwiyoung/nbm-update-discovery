@@ -230,6 +230,86 @@ def _parallel_category_process_envs(
     }
 
 
+def _task_resource_ids(task: TaskORM, *, side: str) -> list[int]:
+    plural = (
+        list(task.standard_resource_ids or [])
+        if side == "standard"
+        else list(task.compare_resource_ids or [])
+    )
+    single = task.standard_resource_id if side == "standard" else task.compare_resource_id
+    ids: list[int] = []
+    for value in [*plural, single]:
+        if value is None:
+            continue
+        if value not in ids:
+            ids.append(value)
+    return ids
+
+
+def _load_task_datasets(db: Any, ids: list[int], *, side: str) -> list[DatasetORM]:
+    if not ids:
+        raise ValueError(f"{side} dataset ids are empty")
+    rows = list(db.execute(select(DatasetORM).where(DatasetORM.id.in_(ids))).scalars())
+    by_id = {row.id: row for row in rows}
+    missing = [id_ for id_ in ids if id_ not in by_id]
+    if missing:
+        raise ValueError(f"{side} datasets not found: {missing}")
+    return [by_id[id_] for id_ in ids]
+
+
+def _union_sheet_codes(datasets: list[DatasetORM]) -> set[str]:
+    out: set[str] = set()
+    for dataset in datasets:
+        out.update(dataset.sheet_codes or [])
+    return out
+
+
+def _task_side_tile_path(
+    *,
+    settings: Any,
+    task_id: str,
+    side: str,
+    datasets: list[DatasetORM],
+) -> str:
+    paths = [str(dataset.tile_path or "") for dataset in datasets]
+    missing = [
+        str(dataset.id)
+        for dataset, path in zip(datasets, paths, strict=True)
+        if not path
+    ]
+    if missing:
+        raise ValueError(f"{side} dataset tile_path missing: {', '.join(missing)}")
+    if len(paths) == 1:
+        return paths[0]
+
+    source_dir = task_artifact_dir(settings, task_id) / "source_vrts"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    vrt_path = source_dir / f"{side}.vrt"
+    list_path = source_dir / f"{side}.txt"
+    list_path.write_text("\n".join(paths) + "\n", encoding="utf-8")
+    cmd = [
+        "gdalbuildvrt",
+        "-overwrite",
+        "-resolution",
+        "highest",
+        "-input_file_list",
+        str(list_path),
+        str(vrt_path),
+    ]
+    result = subprocess.run(
+        cmd,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "gdalbuildvrt failed for "
+            f"{side}: {result.stderr.strip() or result.stdout.strip()}"
+        )
+    return str(vrt_path)
+
+
 @celery_app.task(bind=True, name="nbm.run_change_detection")
 def run_change_detection(self, task_id: str) -> dict[str, Any]:
     """변화탐지 작업 실행 — 실제 알고리즘 결과를 DB INSERT."""
@@ -260,17 +340,19 @@ def run_change_detection(self, task_id: str) -> dict[str, Any]:
         )
         self.update_state(state="STARTED", meta={"progress": 5})
 
-        std = db.get(DatasetORM, task.standard_resource_id)
-        cmp_ = db.get(DatasetORM, task.compare_resource_id)
-        if std is None or cmp_ is None:
-            task.status = "failed"
-            db.commit()
-            return {"status": "failed", "error": "datasets not found"}
-        standard_tile_path = str(std.tile_path or "")
-        compare_tile_path = str(cmp_.tile_path or "")
+        standard_datasets = _load_task_datasets(
+            db,
+            _task_resource_ids(task, side="standard"),
+            side="standard",
+        )
+        compare_datasets = _load_task_datasets(
+            db,
+            _task_resource_ids(task, side="compare"),
+            side="compare",
+        )
 
-        std_set = set(std.sheet_codes)
-        cmp_set = set(cmp_.sheet_codes)
+        std_set = _union_sheet_codes(standard_datasets)
+        cmp_set = _union_sheet_codes(compare_datasets)
         common_codes = std_set & cmp_set
         requested_codes = set(task.sheet_codes or [])
         target_codes = sorted(
@@ -286,14 +368,24 @@ def run_change_detection(self, task_id: str) -> dict[str, Any]:
 
         engine_mode = settings.change_detection_engine_mode.strip().lower()
         if engine_mode == "algorithm":
+            standard_tile_path = _task_side_tile_path(
+                settings=settings,
+                task_id=task_id,
+                side="standard",
+                datasets=standard_datasets,
+            )
+            compare_tile_path = _task_side_tile_path(
+                settings=settings,
+                task_id=task_id,
+                side="compare",
+                datasets=compare_datasets,
+            )
             return _run_algorithm_detection(
                 self=self,
                 db=db,
                 task=task,
                 task_id=task_id,
                 settings=settings,
-                std=std,
-                cmp_=cmp_,
                 standard_tile_path=standard_tile_path,
                 compare_tile_path=compare_tile_path,
                 target_codes=target_codes,
@@ -396,8 +488,6 @@ def _run_algorithm_detection(
     task: TaskORM,
     task_id: str,
     settings: Any,
-    std: DatasetORM,
-    cmp_: DatasetORM,
     standard_tile_path: str,
     compare_tile_path: str,
     target_codes: list[str],

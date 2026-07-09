@@ -54,6 +54,49 @@ def _task_detection_count(db: Session, task_id: str) -> int:
     )
 
 
+def _normalize_resource_ids(
+    ids: list[int],
+    fallback: int | None,
+) -> list[int]:
+    normalized: list[int] = []
+    for value in [*ids, fallback]:
+        if value is None:
+            continue
+        if value not in normalized:
+            normalized.append(value)
+    return normalized
+
+
+def _load_datasets_or_404(
+    db: Session,
+    ids: list[int],
+    *,
+    field: str,
+) -> list[DatasetORM]:
+    rows = list(db.execute(select(DatasetORM).where(DatasetORM.id.in_(ids))).scalars())
+    by_id = {row.id: row for row in rows}
+    missing = [id_ for id_ in ids if id_ not in by_id]
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "code": "RESOURCE_NOT_FOUND",
+                    "message": "데이터셋을 찾을 수 없습니다",
+                    "details": {field: ids, "missing_ids": missing},
+                }
+            },
+        )
+    return [by_id[id_] for id_ in ids]
+
+
+def _union_sheet_codes(datasets: list[DatasetORM]) -> set[str]:
+    out: set[str] = set()
+    for dataset in datasets:
+        out.update(dataset.sheet_codes or [])
+    return out
+
+
 @router.get("", response_model=list[Task])
 def list_tasks(db: Session = Depends(get_db)) -> list[Task]:
     rows = db.execute(select(TaskORM).order_by(TaskORM.created_at.desc())).scalars().all()
@@ -95,35 +138,44 @@ def get_task(task_id: str, db: Session = Depends(get_db)) -> Task:
 def create_task(payload: TaskCreatePayload, db: Session = Depends(get_db)) -> Task:
     """위저드 등록 + Celery enqueue.
 
-    유효성: 두 자원 sheet_codes 교집합 ≥ 1.
+    유효성: 과년도 묶음과 당해년도 묶음의 sheet_codes 교집합 ≥ 1.
     """
-    std = db.get(DatasetORM, payload.standard_resource_id)
-    cmp_ = db.get(DatasetORM, payload.compare_resource_id)
-    if std is None or cmp_ is None:
+    standard_ids = _normalize_resource_ids(
+        payload.standard_resource_ids,
+        payload.standard_resource_id,
+    )
+    compare_ids = _normalize_resource_ids(
+        payload.compare_resource_ids,
+        payload.compare_resource_id,
+    )
+    if not standard_ids or not compare_ids:
         raise HTTPException(
-            status_code=404,
+            status_code=400,
             detail={
                 "error": {
-                    "code": "RESOURCE_NOT_FOUND",
-                    "message": "데이터셋을 찾을 수 없습니다",
+                    "code": "BUSINESS_RULE_VIOLATION",
+                    "message": "과년도와 당해년도 데이터셋을 각각 1개 이상 선택해야 합니다",
                     "details": {
-                        "standard_resource_id": payload.standard_resource_id,
-                        "compare_resource_id": payload.compare_resource_id,
+                        "standard_resource_ids": standard_ids,
+                        "compare_resource_ids": compare_ids,
                     },
                 }
             },
         )
-    common = sorted(set(std.sheet_codes) & set(cmp_.sheet_codes))
+
+    standards = _load_datasets_or_404(db, standard_ids, field="standard_resource_ids")
+    compares = _load_datasets_or_404(db, compare_ids, field="compare_resource_ids")
+    common = sorted(_union_sheet_codes(standards) & _union_sheet_codes(compares))
     if not common:
         raise HTTPException(
             status_code=400,
             detail={
                 "error": {
                     "code": "BUSINESS_RULE_VIOLATION",
-                    "message": "두 자원의 공통 도엽이 없어 작업을 등록할 수 없습니다",
+                    "message": "선택한 과년도·당해년도 영상의 공통 도엽이 없어 작업을 등록할 수 없습니다",
                     "details": {
-                        "standard_id": payload.standard_resource_id,
-                        "compare_id": payload.compare_resource_id,
+                        "standard_resource_ids": standard_ids,
+                        "compare_resource_ids": compare_ids,
                     },
                 }
             },
@@ -136,8 +188,10 @@ def create_task(payload: TaskCreatePayload, db: Session = Depends(get_db)) -> Ta
         description=payload.description,
         models=list(payload.models),
         compare_type=payload.compare_type,
-        standard_resource_id=payload.standard_resource_id,
-        compare_resource_id=payload.compare_resource_id,
+        standard_resource_id=standard_ids[0],
+        compare_resource_id=compare_ids[0],
+        standard_resource_ids=standard_ids,
+        compare_resource_ids=compare_ids,
         sheet_codes=common,
         status="pending",
         progress=0,
@@ -421,8 +475,26 @@ def update_task(
         row.models = list(data["models"])
     if "standard_resource_id" in data:
         row.standard_resource_id = data["standard_resource_id"]
+        if "standard_resource_ids" not in data:
+            row.standard_resource_ids = (
+                [data["standard_resource_id"]]
+                if data["standard_resource_id"] is not None
+                else []
+            )
     if "compare_resource_id" in data:
         row.compare_resource_id = data["compare_resource_id"]
+        if "compare_resource_ids" not in data:
+            row.compare_resource_ids = (
+                [data["compare_resource_id"]]
+                if data["compare_resource_id"] is not None
+                else []
+            )
+    if "standard_resource_ids" in data and data["standard_resource_ids"] is not None:
+        row.standard_resource_ids = list(data["standard_resource_ids"])
+        row.standard_resource_id = row.standard_resource_ids[0] if row.standard_resource_ids else None
+    if "compare_resource_ids" in data and data["compare_resource_ids"] is not None:
+        row.compare_resource_ids = list(data["compare_resource_ids"])
+        row.compare_resource_id = row.compare_resource_ids[0] if row.compare_resource_ids else None
     db.commit()
     db.refresh(row)
     return task_to_schema(row, _task_detection_count(db, row.id))

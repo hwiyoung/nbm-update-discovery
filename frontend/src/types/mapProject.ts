@@ -25,6 +25,7 @@ export interface OrthoCurrent extends OrthoImage {
 
 export interface OrthoPast extends OrthoImage {
   era: "past";
+  included: boolean;
 }
 
 export interface OrthoGroup {
@@ -50,5 +51,11 @@ export interface OrthoSummary {
 export interface OrthoPair {
   past: OrthoPast;
   current: OrthoCurrent;
+  commonSheets: string[];
+}
+
+export interface OrthoCompositeSelection {
+  pasts: OrthoPast[];
+  currents: OrthoCurrent[];
   commonSheets: string[];
 }

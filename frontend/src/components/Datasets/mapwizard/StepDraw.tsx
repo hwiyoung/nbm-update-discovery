@@ -1,7 +1,6 @@
-import { Search, Square, Trash2 } from "lucide-react";
-import { Button } from "@/components/Common";
-import type { BBox, OrthoGroup, OrthoSummary } from "@/types/mapProject";
-import { overlapPercent, overlapTone } from "@/utils/mapProject";
+import { MousePointer2, Search } from "lucide-react";
+import type { BBox, OrthoGroup, OrthoImage, OrthoSummary } from "@/types/mapProject";
+import { allOrthoFeatures, overlapPercent, overlapTone } from "@/utils/mapProject";
 import { cn } from "@/utils/cn";
 
 export interface StepDrawProps {
@@ -9,9 +8,8 @@ export interface StepDrawProps {
   summary: OrthoSummary;
   readyDatasetCount: number;
   groups: OrthoGroup[];
-  drawing: boolean;
-  onStartDrawing: () => void;
-  onClear: () => void;
+  hoveredId: string | null;
+  onHover: (id: string | null) => void;
 }
 
 export function StepDraw({
@@ -19,12 +17,12 @@ export function StepDraw({
   summary,
   readyDatasetCount,
   groups,
-  drawing,
-  onStartDrawing,
-  onClear,
+  hoveredId,
+  onHover,
 }: StepDrawProps) {
   const hasResult = summary.matchedCount > 0;
   const hasEmptyResult = drawnBBox && !hasResult;
+  const images = allOrthoFeatures(groups);
 
   return (
     <div className="p-5 space-y-5">
@@ -32,33 +30,21 @@ export function StepDraw({
         <div className="text-[11px] font-black uppercase tracking-wide text-blue-600">
           Step 1
         </div>
-        <h3 className="text-xl font-black text-slate-900">대상 영역 지정</h3>
+        <h3 className="text-xl font-black text-slate-900">분석 영역 지정</h3>
         <p className="text-sm leading-6 text-slate-600">
-          지도에서 변화탐지를 수행할 범위를 사각형으로 지정하면, 범위와 겹치는
-          과년도·당해년도 정사영상을 자동으로 찾습니다.
+          지도 위에서 바로 사각형을 그리면 범위와 겹치는 정사영상을 조회합니다.
+          새 영역을 그리면 기존 영역은 자동으로 교체됩니다.
         </p>
       </section>
 
-      <div className="grid grid-cols-2 gap-2">
-        <Button
-          variant="primary"
-          size="lg"
-          leftIcon={<Square size={16} />}
-          onClick={onStartDrawing}
-          fullWidth
-        >
-          {drawnBBox ? "다시 그리기" : drawing ? "그리는 중" : "영역 그리기"}
-        </Button>
-        <Button
-          variant="secondary"
-          size="lg"
-          leftIcon={<Trash2 size={16} />}
-          onClick={onClear}
-          disabled={!drawnBBox && !drawing}
-          fullWidth
-        >
-          영역 지우기
-        </Button>
+      <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 text-xs font-bold leading-5 text-blue-800">
+        <div className="flex items-start gap-2">
+          <MousePointer2 size={15} className="mt-0.5 shrink-0" />
+          <span>
+            좌클릭 드래그로 영역을 지정합니다. 지도 이동은 휠 버튼을 누른 채
+            드래그하고, 그린 영역 밖을 클릭하면 선택 영역이 지워집니다.
+          </span>
+        </div>
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
@@ -77,7 +63,7 @@ export function StepDraw({
             영역을 그리면 조회 결과가 표시됩니다
           </div>
           <div className="mt-1 text-xs text-slate-400">
-            과년도 1장과 당해년도 여러 장의 매칭을 다음 단계에서 확인합니다.
+            조회된 영상은 다음 단계에서 과년도와 당해년도 입력으로 선택합니다.
           </div>
         </div>
       ) : null}
@@ -112,27 +98,13 @@ export function StepDraw({
               조회 영상
             </div>
             <div className="max-h-[170px] overflow-y-auto custom-scrollbar p-2 space-y-1.5">
-              {groups.map((group) => (
-                <div
-                  key={group.past.id}
-                  className="rounded-md border border-slate-100 bg-white px-2.5 py-2"
-                >
-                  <ImageLine
-                    tone="past"
-                    label="과년도"
-                    id={group.past.id}
-                    name={group.past.displayName}
-                  />
-                  {group.currents.map((current) => (
-                    <ImageLine
-                      key={current.id}
-                      tone="current"
-                      label="당해년도"
-                      id={current.id}
-                      name={current.displayName}
-                    />
-                  ))}
-                </div>
+              {images.map((image) => (
+                <ImageLine
+                  key={image.id}
+                  image={image}
+                  active={hoveredId === image.id}
+                  onHover={onHover}
+                />
               ))}
             </div>
           </div>
@@ -154,30 +126,37 @@ export function StepDraw({
 }
 
 function ImageLine({
-  tone,
-  label,
-  id,
-  name,
+  image,
+  active,
+  onHover,
 }: {
-  tone: "past" | "current";
-  label: string;
-  id: string;
-  name: string;
+  image: OrthoImage;
+  active: boolean;
+  onHover: (id: string | null) => void;
 }) {
   return (
-    <div className="flex items-center gap-2 py-0.5 text-[11px]">
+    <div
+      onMouseEnter={() => onHover(image.id)}
+      onMouseLeave={() => onHover(null)}
+      className={cn(
+        "rounded-md border px-2.5 py-2 text-[11px] transition-colors",
+        active ? "border-blue-200 bg-blue-50" : "border-slate-100 bg-white",
+      )}
+    >
+      <div className="flex items-center gap-2">
       <span
-        className={cn(
-          "shrink-0 rounded-full px-1.5 py-0.5 font-black",
-          tone === "past"
-            ? "bg-blue-50 text-blue-700"
-            : "bg-emerald-50 text-emerald-700",
-        )}
+        className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 font-black text-slate-600"
       >
-        {label}
+        {image.year ?? "-"}
       </span>
-      <span className="shrink-0 font-mono font-black text-slate-700">{id}</span>
-      <span className="min-w-0 truncate font-bold text-slate-600">{name}</span>
+      <span className="shrink-0 font-mono font-black text-slate-700">{image.id}</span>
+      <span className="min-w-0 truncate font-bold text-slate-600">
+        {image.displayName}
+      </span>
+      </div>
+      <div className="mt-1 truncate pl-[54px] text-[10px] font-bold text-slate-400">
+        {image.regions[0] ?? "권역 미확인"} · 도엽 {image.sheets.length.toLocaleString("ko-KR")}매
+      </div>
     </div>
   );
 }

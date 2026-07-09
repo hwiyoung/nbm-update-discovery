@@ -9,7 +9,7 @@ import { useTasksStore } from "@/stores/tasksStore";
 import { createTask } from "@/api/client";
 import {
   buildOrthoGroupsFromDatasets,
-  selectedOrthoPairs,
+  selectedOrthoComposite,
   summarizeOrthoGroups,
 } from "@/utils/mapProject";
 import { MapProjectStepper } from "./mapwizard/Stepper";
@@ -25,8 +25,8 @@ const STEP_ORDER: WizardStep[] = ["draw", "review", "meta"];
  *
  * 흐름:
  *   1. 지도에서 bbox 지정
- *   2. bbox 와 교차하는 기존 정사영상 자동 매칭 및 당해년도 포함/제외 검토
- *   3. 작업명·객체·자동실행 설정 후 선택 조합별 task 등록
+ *   2. bbox 와 교차하는 기존 정사영상 중 과년도/당해년도 입력 선택
+ *   3. 작업명·객체·자동실행 설정 후 선택 묶음 기준 task 등록
  */
 export function NewTaskWizard() {
   const open = useDatasetsStore((state) => state.wizardOpen);
@@ -38,6 +38,7 @@ export function NewTaskWizard() {
   const setDrawnBBox = useDatasetsStore((state) => state.setWizardDrawnBBox);
   const setGroups = useDatasetsStore((state) => state.setWizardGroups);
   const setHovered = useDatasetsStore((state) => state.setWizardHoveredOrtho);
+  const togglePast = useDatasetsStore((state) => state.toggleWizardPast);
   const toggleCurrent = useDatasetsStore((state) => state.toggleWizardCurrent);
   const datasets = useDatasetsStore((state) => state.datasets);
   const datasetsLoading = useDatasetsStore((state) => state.loading);
@@ -49,7 +50,6 @@ export function NewTaskWizard() {
   const loadRegions = useSheetsStore((state) => state.loadRegions);
   const navigate = useNavigate();
 
-  const [drawing, setDrawing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -76,8 +76,8 @@ export function NewTaskWizard() {
     () => summarizeOrthoGroups(selection.groups),
     [selection.groups],
   );
-  const pairs = useMemo(
-    () => selectedOrthoPairs(selection.groups),
+  const composite = useMemo(
+    () => selectedOrthoComposite(selection.groups),
     [selection.groups],
   );
   const readyDatasetCount = useMemo(
@@ -87,12 +87,19 @@ export function NewTaskWizard() {
 
   const canNext = (() => {
     if (step === "draw") return Boolean(selection.drawnBBox) && summary.matchedCount > 0;
-    if (step === "review") return summary.currentCount > 0 && pairs.length > 0;
+    if (step === "review") {
+      return (
+        composite.pasts.length > 0 &&
+        composite.currents.length > 0 &&
+        composite.commonSheets.length > 0
+      );
+    }
     return (
       selection.name.trim().length > 0 &&
       selection.models.length > 0 &&
-      pairs.length > 0 &&
-      pairs.every((pair) => pair.commonSheets.length > 0)
+      composite.pasts.length > 0 &&
+      composite.currents.length > 0 &&
+      composite.commonSheets.length > 0
     );
   })();
 
@@ -118,47 +125,40 @@ export function NewTaskWizard() {
   };
 
   const clearArea = () => {
-    setDrawing(false);
     setDrawnBBox(null);
     setStep("draw");
   };
 
   const submitTasks = async () => {
-    const validPairs = pairs.filter((pair) => pair.commonSheets.length > 0);
-    if (validPairs.length === 0) {
-      toast.error("공통 도엽이 있는 영상 조합이 필요합니다");
+    if (
+      composite.pasts.length === 0 ||
+      composite.currents.length === 0 ||
+      composite.commonSheets.length === 0
+    ) {
+      toast.error("공통 도엽이 있는 과년도·당해년도 영상 선택이 필요합니다");
       return;
     }
 
     setSubmitting(true);
     try {
-      const created = [];
-      for (const [index, pair] of validPairs.entries()) {
-        const task = await createTask({
-          name:
-            validPairs.length === 1
-              ? selection.name.trim()
-              : `${selection.name.trim()} · ${pair.past.id}-${pair.current.id}`,
-          description: selection.description,
-          models: selection.models,
-          compare_type: "image-image",
-          standard_resource_id: pair.past.datasetId,
-          compare_resource_id: pair.current.datasetId,
-          auto_run: selection.autoRun,
-        });
-        appendTask(task);
-        if (index === 0 && selection.autoRun) setPendingTaskId(task.id);
-        created.push(task);
-      }
+      const standardIds = composite.pasts.map((image) => image.datasetId);
+      const compareIds = composite.currents.map((image) => image.datasetId);
+      const task = await createTask({
+        name: selection.name.trim(),
+        description: selection.description,
+        models: selection.models,
+        compare_type: "image-image",
+        standard_resource_id: standardIds[0]!,
+        compare_resource_id: compareIds[0]!,
+        standard_resource_ids: standardIds,
+        compare_resource_ids: compareIds,
+        auto_run: selection.autoRun,
+      });
+      appendTask(task);
+      if (selection.autoRun) setPendingTaskId(task.id);
       close();
-      if (created.length > 0) {
-        toast.success(
-          created.length === 1
-            ? "작업이 등록되었습니다"
-            : `${created.length.toLocaleString("ko-KR")}개 작업이 등록되었습니다`,
-        );
-        navigate(`/tasks/${created[0]!.id}`);
-      }
+      toast.success("프로젝트가 등록되었습니다");
+      navigate(`/tasks/${task.id}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -174,9 +174,9 @@ export function NewTaskWizard() {
       }}
       title={
         <div className="flex items-center gap-2">
-          <span>지도 기반 프로젝트 생성</span>
+          <span>변화탐지 프로젝트 생성</span>
           <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-black text-slate-500">
-            신규 변화탐지 작업
+            정사영상 범위 선택
           </span>
         </div>
       }
@@ -213,7 +213,7 @@ export function NewTaskWizard() {
       }
     >
       <ModalDescription>
-        지도에서 영역을 지정하고 겹치는 정사영상을 검토한 뒤 변화탐지 작업을 등록합니다.
+        지도에서 분석 범위를 지정하고 과년도·당해년도 정사영상을 선택해 프로젝트를 등록합니다.
       </ModalDescription>
 
       <div className="-m-6 flex h-[min(720px,calc(88vh-136px))] min-h-[620px] flex-col">
@@ -227,13 +227,13 @@ export function NewTaskWizard() {
               drawnBBox={selection.drawnBBox}
               groups={selection.groups}
               hoveredId={selection.hoveredOrthoId}
-              drawing={drawing}
               onDrawn={(bbox) => {
                 setDrawnBBox(bbox);
                 setStep("draw");
               }}
-              onDrawingChange={setDrawing}
+              onClear={clearArea}
               onHover={setHovered}
+              onTogglePast={togglePast}
               onToggleCurrent={toggleCurrent}
             />
           </div>
@@ -245,17 +245,18 @@ export function NewTaskWizard() {
                 summary={summary}
                 readyDatasetCount={readyDatasetCount}
                 groups={selection.groups}
-                drawing={drawing}
-                onStartDrawing={() => setDrawing(true)}
-                onClear={clearArea}
+                hoveredId={selection.hoveredOrthoId}
+                onHover={setHovered}
               />
             ) : null}
             {step === "review" ? (
               <StepReview
                 groups={selection.groups}
                 summary={summary}
+                composite={composite}
                 hoveredId={selection.hoveredOrthoId}
                 onHover={setHovered}
+                onTogglePast={togglePast}
                 onToggleCurrent={toggleCurrent}
               />
             ) : null}
@@ -263,7 +264,7 @@ export function NewTaskWizard() {
               <StepMeta
                 selection={selection}
                 summary={summary}
-                pairs={pairs}
+                composite={composite}
                 onChange={setSelection}
               />
             ) : null}

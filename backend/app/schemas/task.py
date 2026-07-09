@@ -28,6 +28,8 @@ class Task(BaseModel):
     compare_type: CompareType
     standard_resource_id: int | None = None
     compare_resource_id: int | None = None
+    standard_resource_ids: list[int] = Field(default_factory=list)
+    compare_resource_ids: list[int] = Field(default_factory=list)
 
     sheet_codes: list[str] = Field(default_factory=list)
     status: TaskStatus
@@ -51,8 +53,10 @@ class TaskCreatePayload(BaseModel):
     description: str = ""
     models: list[ObjectCategory]
     compare_type: CompareType = "image-image"
-    standard_resource_id: int
-    compare_resource_id: int
+    standard_resource_id: int | None = None
+    compare_resource_id: int | None = None
+    standard_resource_ids: list[int] = Field(default_factory=list)
+    compare_resource_ids: list[int] = Field(default_factory=list)
     auto_run: bool = True
     """True (기본): 등록 직후 Celery enqueue. False: 작업 row 만 생성, 추후 수동 시작."""
 
@@ -63,4 +67,6 @@ class TaskUpdatePayload(BaseModel):
     description: str | None = None
     standard_resource_id: int | None = None
     compare_resource_id: int | None = None
+    standard_resource_ids: list[int] | None = None
+    compare_resource_ids: list[int] | None = None
     models: list[ObjectCategory] | None = None

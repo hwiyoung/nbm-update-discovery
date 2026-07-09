@@ -193,6 +193,12 @@ def history_to_schema(row: ReviewHistoryORM) -> ReviewHistory:
 
 
 def task_to_schema(row: TaskORM, detection_count: int = 0) -> Task:
+    standard_ids = list(row.standard_resource_ids or [])
+    compare_ids = list(row.compare_resource_ids or [])
+    if not standard_ids and row.standard_resource_id is not None:
+        standard_ids = [row.standard_resource_id]
+    if not compare_ids and row.compare_resource_id is not None:
+        compare_ids = [row.compare_resource_id]
     progress_meta = read_task_progress(get_settings(), row.id)
     return Task(
         id=row.id,
@@ -202,6 +208,8 @@ def task_to_schema(row: TaskORM, detection_count: int = 0) -> Task:
         compare_type=row.compare_type,  # type: ignore[arg-type]
         standard_resource_id=row.standard_resource_id,
         compare_resource_id=row.compare_resource_id,
+        standard_resource_ids=standard_ids,
+        compare_resource_ids=compare_ids,
         sheet_codes=list(row.sheet_codes),
         status=row.status,  # type: ignore[arg-type]
         progress=row.progress,

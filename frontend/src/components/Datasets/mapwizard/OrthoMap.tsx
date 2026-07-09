@@ -44,11 +44,11 @@ export interface OrthoMapProps {
   drawnBBox: BBox | null;
   groups: OrthoGroup[];
   hoveredId: string | null;
-  drawing: boolean;
   onDrawn: (bbox: BBox) => void;
-  onDrawingChange: (drawing: boolean) => void;
+  onClear: () => void;
   onHover: (id: string | null) => void;
-  onToggleCurrent: (pastId: string, currentId: string) => void;
+  onTogglePast: (pastId: string) => void;
+  onToggleCurrent: (currentId: string) => void;
 }
 
 export function OrthoMap({
@@ -58,10 +58,10 @@ export function OrthoMap({
   drawnBBox,
   groups,
   hoveredId,
-  drawing,
   onDrawn,
-  onDrawingChange,
+  onClear,
   onHover,
+  onTogglePast,
   onToggleCurrent,
 }: OrthoMapProps) {
   const summary = useMemo(() => summarizeOrthoGroups(groups), [groups]);
@@ -97,9 +97,10 @@ export function OrthoMap({
           guideFeatures={guideFeatures}
         />
         <RectangleDrawController
-          drawing={drawing}
+          active={step === "draw"}
+          drawnBBox={drawnBBox}
           onDrawn={onDrawn}
-          onDrawingChange={onDrawingChange}
+          onClear={onClear}
         />
         {step === "draw" && regionData ? (
           <RegionPolygonsLayer data={regionData} selectedRegion={summary.region} />
@@ -124,7 +125,9 @@ export function OrthoMap({
           <FootprintsLayer
             groups={groups}
             hoveredId={hoveredId}
+            selectable={step !== "draw"}
             onHover={onHover}
+            onTogglePast={onTogglePast}
             onToggleCurrent={onToggleCurrent}
           />
         ) : null}
@@ -132,11 +135,11 @@ export function OrthoMap({
 
       <div className="absolute left-1/2 top-3 z-[500] -translate-x-1/2 pointer-events-none">
         <div className="rounded-full border border-white/70 bg-white/95 px-3 py-1.5 text-xs font-black text-slate-700 shadow-sm">
-          {drawing
-            ? "드래그해서 대상 영역을 지정"
-            : drawnBBox
-              ? `정사영상 ${summary.matchedCount.toLocaleString("ko-KR")}장 조회`
-              : "지도에서 변화탐지 대상 영역 지정"}
+          {step === "draw"
+            ? drawnBBox
+              ? `좌클릭 드래그로 영역 교체 · 휠 버튼 드래그로 이동 · 정사영상 ${summary.matchedCount.toLocaleString("ko-KR")}장`
+              : "좌클릭 드래그로 영역 지정 · 휠 버튼 드래그로 이동"
+            : `정사영상 ${summary.matchedCount.toLocaleString("ko-KR")}장 조회`}
         </div>
       </div>
 
@@ -152,24 +155,27 @@ export function OrthoMap({
 }
 
 function RectangleDrawController({
-  drawing,
+  active,
+  drawnBBox,
   onDrawn,
-  onDrawingChange,
+  onClear,
 }: {
-  drawing: boolean;
+  active: boolean;
+  drawnBBox: BBox | null;
   onDrawn: (bbox: BBox) => void;
-  onDrawingChange: (drawing: boolean) => void;
+  onClear: () => void;
 }) {
   const map = useMap();
   const previewRef = useRef<L.Rectangle | null>(null);
 
   useEffect(() => {
-    if (!drawing) return undefined;
+    if (!active) return undefined;
     const container = map.getContainer();
     const previousCursor = container.style.cursor;
     const wasDraggingEnabled = map.dragging.enabled();
     const wasDoubleClickZoomEnabled = map.doubleClickZoom.enabled();
     let start: L.LatLng | null = null;
+    let middlePan: { last: L.Point } | null = null;
 
     container.style.cursor = "crosshair";
     map.dragging.disable();
@@ -181,6 +187,14 @@ function RectangleDrawController({
     };
 
     const onMouseDown = (event: L.LeafletMouseEvent) => {
+      if (event.originalEvent.button === 1) {
+        middlePan = { last: map.latLngToContainerPoint(event.latlng) };
+        container.style.cursor = "grabbing";
+        L.DomEvent.preventDefault(event.originalEvent);
+        L.DomEvent.stop(event.originalEvent);
+        return;
+      }
+      if (event.originalEvent.button !== 0) return;
       start = event.latlng;
       clearPreview();
       previewRef.current = L.rectangle(L.latLngBounds(start, start), {
@@ -195,11 +209,25 @@ function RectangleDrawController({
     };
 
     const onMouseMove = (event: L.LeafletMouseEvent) => {
+      if (middlePan) {
+        const current = map.latLngToContainerPoint(event.latlng);
+        map.panBy(middlePan.last.subtract(current), { animate: false });
+        middlePan = { last: current };
+        L.DomEvent.preventDefault(event.originalEvent);
+        return;
+      }
       if (!start || !previewRef.current) return;
       previewRef.current.setBounds(L.latLngBounds(start, event.latlng));
     };
 
     const onMouseUp = (event: L.LeafletMouseEvent) => {
+      if (middlePan) {
+        middlePan = null;
+        container.style.cursor = "crosshair";
+        L.DomEvent.preventDefault(event.originalEvent);
+        L.DomEvent.stop(event.originalEvent);
+        return;
+      }
       if (!start) return;
       const bounds = L.latLngBounds(start, event.latlng);
       start = null;
@@ -209,6 +237,9 @@ function RectangleDrawController({
       const east = bounds.getEast();
       const north = bounds.getNorth();
       if (Math.abs(east - west) < 0.00002 || Math.abs(north - south) < 0.00002) {
+        if (drawnBBox && !bboxContainsLatLng(drawnBBox, event.latlng)) {
+          onClear();
+        }
         return;
       }
       onDrawn([
@@ -217,13 +248,18 @@ function RectangleDrawController({
         east,
         north,
       ]);
-      onDrawingChange(false);
       L.DomEvent.stop(event.originalEvent);
+    };
+
+    const onAuxClick = (event: MouseEvent) => {
+      if (event.button !== 1) return;
+      event.preventDefault();
     };
 
     map.on("mousedown", onMouseDown);
     map.on("mousemove", onMouseMove);
     map.on("mouseup", onMouseUp);
+    container.addEventListener("auxclick", onAuxClick);
     return () => {
       clearPreview();
       container.style.cursor = previousCursor;
@@ -232,8 +268,9 @@ function RectangleDrawController({
       map.off("mousedown", onMouseDown);
       map.off("mousemove", onMouseMove);
       map.off("mouseup", onMouseUp);
+      container.removeEventListener("auxclick", onAuxClick);
     };
-  }, [drawing, map, onDrawn, onDrawingChange]);
+  }, [active, drawnBBox, map, onClear, onDrawn]);
 
   return null;
 }
@@ -336,13 +373,17 @@ function GuideLayer({ data }: { data: FeatureCollection<Polygon> }) {
 function FootprintsLayer({
   groups,
   hoveredId,
+  selectable,
   onHover,
+  onTogglePast,
   onToggleCurrent,
 }: {
   groups: OrthoGroup[];
   hoveredId: string | null;
+  selectable: boolean;
   onHover: (id: string | null) => void;
-  onToggleCurrent: (pastId: string, currentId: string) => void;
+  onTogglePast: (pastId: string) => void;
+  onToggleCurrent: (currentId: string) => void;
 }) {
   const layerRef = useRef<LeafletGeoJSON | null>(null);
   const fc = useMemo(() => groupsToFeatureCollection(groups), [groups]);
@@ -375,7 +416,6 @@ function FootprintsLayer({
       onEachFeature={(feature, layer) => {
         const id = String(feature.properties?.id ?? "");
         const era = String(feature.properties?.era ?? "");
-        const pastId = String(feature.properties?.pastId ?? "");
         const label = String(feature.properties?.label ?? id);
         layer.bindTooltip(label, {
           sticky: true,
@@ -386,7 +426,12 @@ function FootprintsLayer({
           mouseover: () => onHover(id),
           mouseout: () => onHover(null),
           click: (event) => {
-            if (era === "current" && pastId) onToggleCurrent(pastId, id);
+            if (!selectable) return;
+            if (era === "current") {
+              onToggleCurrent(id);
+            } else {
+              onTogglePast(id);
+            }
             L.DomEvent.stopPropagation(event);
           },
         });
@@ -557,22 +602,51 @@ function regionColor(region: string): string {
 }
 
 function groupsToFeatureCollection(groups: OrthoGroup[]): FeatureCollection<Polygon> {
-  const features = allOrthoFeatures(groups).map((image) => {
-    const group = groups.find((item) =>
-      image.era === "past"
-        ? item.past.id === image.id
-        : item.currents.some((current) => current.id === image.id),
-    );
+  const byId = new Map<
+    string,
+    {
+      image: ReturnType<typeof allOrthoFeatures>[number];
+      pastIncluded: boolean;
+      currentIncluded: boolean;
+    }
+  >();
+
+  for (const group of groups) {
+    const past = byId.get(group.past.id) ?? {
+      image: group.past,
+      pastIncluded: false,
+      currentIncluded: false,
+    };
+    past.pastIncluded ||= group.past.included;
+    byId.set(group.past.id, past);
+
+    for (const current of group.currents) {
+      const item = byId.get(current.id) ?? {
+        image: current,
+        pastIncluded: false,
+        currentIncluded: false,
+      };
+      item.currentIncluded ||= current.included;
+      byId.set(current.id, item);
+    }
+  }
+
+  const features = Array.from(byId.values()).map((item) => {
+    const era =
+      item.pastIncluded && item.currentIncluded
+        ? "both"
+        : item.currentIncluded
+          ? "current"
+          : "past";
     return {
       type: "Feature" as const,
       properties: {
-        id: image.id,
-        pastId: image.era === "current" ? group?.past.id : "",
-        era: image.era,
-        included: image.era === "current" ? (image as { included?: boolean }).included : true,
-        label: `${image.id} · ${image.displayName}`,
+        id: item.image.id,
+        era,
+        included: item.pastIncluded || item.currentIncluded,
+        label: `${item.image.id} · ${item.image.displayName}`,
       },
-      geometry: image.geometry,
+      geometry: item.image.geometry,
     };
   });
   return { type: "FeatureCollection", features };
@@ -582,14 +656,25 @@ function footprintStyle(feature: Feature | undefined, hovered: boolean): PathOpt
   const era = String(feature?.properties?.era ?? "");
   const included = feature?.properties?.included !== false;
 
+  if (era === "both") {
+    return {
+      color: included ? "#7c3aed" : "#94a3b8",
+      weight: hovered ? 3.4 : 2.6,
+      opacity: included ? 1 : 0.45,
+      dashArray: "4 3",
+      fillColor: included ? "#8b5cf6" : "#94a3b8",
+      fillOpacity: included ? (hovered ? 0.24 : 0.14) : 0.04,
+    };
+  }
+
   if (era === "past") {
     return {
-      color: "#2563eb",
+      color: included ? "#2563eb" : "#94a3b8",
       weight: hovered ? 3.2 : 2.2,
-      opacity: 1,
+      opacity: included ? 1 : 0.45,
       dashArray: "6 4",
-      fillColor: "#3b82f6",
-      fillOpacity: hovered ? 0.16 : 0.07,
+      fillColor: included ? "#3b82f6" : "#94a3b8",
+      fillOpacity: included ? (hovered ? 0.16 : 0.07) : 0.04,
     };
   }
 
@@ -600,6 +685,15 @@ function footprintStyle(feature: Feature | undefined, hovered: boolean): PathOpt
     fillColor: included ? "#10b981" : "#94a3b8",
     fillOpacity: included ? (hovered ? 0.28 : 0.18) : 0.04,
   };
+}
+
+function bboxContainsLatLng(bbox: BBox, latlng: L.LatLng): boolean {
+  return (
+    latlng.lng >= bbox[0] &&
+    latlng.lng <= bbox[2] &&
+    latlng.lat >= bbox[1] &&
+    latlng.lat <= bbox[3]
+  );
 }
 
 function featureBounds(

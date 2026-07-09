@@ -719,6 +719,8 @@ export async function createTask(payload: TaskCreatePayload): Promise<Task> {
       compare_type: payload.compare_type,
       standard_resource_id: payload.standard_resource_id,
       compare_resource_id: payload.compare_resource_id,
+      standard_resource_ids: payload.standard_resource_ids ?? [payload.standard_resource_id],
+      compare_resource_ids: payload.compare_resource_ids ?? [payload.compare_resource_id],
       sheet_codes: [],
       status: "pending",
       progress: 0,

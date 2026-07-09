@@ -27,6 +27,8 @@ class TaskORM(Base):
     # 수동 import (외부 결과 GeoJSON 등) 시 NULL 허용.
     standard_resource_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     compare_resource_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    standard_resource_ids: Mapped[list[int]] = mapped_column(ARRAY(Integer), nullable=False, default=list)
+    compare_resource_ids: Mapped[list[int]] = mapped_column(ARRAY(Integer), nullable=False, default=list)
 
     sheet_codes: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", index=True)

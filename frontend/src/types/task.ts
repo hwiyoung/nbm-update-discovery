@@ -20,6 +20,8 @@ export interface Task {
 
   standard_resource_id: number | null;
   compare_resource_id: number | null;
+  standard_resource_ids: number[];
+  compare_resource_ids: number[];
 
   sheet_codes: string[]; // 작업이 커버하는 도엽
   status: TaskStatus;
@@ -52,5 +54,7 @@ export interface TaskCreatePayload {
   compare_type: CompareType;
   standard_resource_id: number;
   compare_resource_id: number;
+  standard_resource_ids?: number[];
+  compare_resource_ids?: number[];
   auto_run?: boolean;
 }
