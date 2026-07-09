@@ -107,6 +107,38 @@ ALGORITHM_TASK_LABELS = {
 
 MIN_VISIBLE_ALGORITHM_STAGE_SECONDS = 2.0
 MIN_VISIBLE_ALGORITHM_STAGES = {"patch", "reconstruct"}
+_TERMINAL_TASK_STATUSES = {"succeeded", "failed", "canceled"}
+
+
+def _current_celery_id(self: Any) -> str | None:
+    return getattr(getattr(self, "request", None), "id", None)
+
+
+def _change_detection_skip_result(
+    task: TaskORM,
+    current_celery_id: str | None,
+) -> dict[str, Any] | None:
+    if task.status in _TERMINAL_TASK_STATUSES:
+        return {
+            "status": task.status,
+            "task_id": task.id,
+            "skipped": True,
+            "reason": "terminal_status",
+        }
+    if (
+        current_celery_id
+        and task.celery_task_id
+        and task.celery_task_id != current_celery_id
+    ):
+        return {
+            "status": task.status,
+            "task_id": task.id,
+            "skipped": True,
+            "reason": "stale_celery_task",
+            "current_celery_id": current_celery_id,
+            "expected_celery_task_id": task.celery_task_id,
+        }
+    return None
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -318,15 +350,22 @@ def run_change_detection(self, task_id: str) -> dict[str, Any]:
         task = db.get(TaskORM, task_id)
         if task is None:
             return {"status": "failed", "error": "task not found"}
-        if task.status == "canceled":
-            return {"status": "canceled", "task_id": task_id}
+        current_celery_id = _current_celery_id(self)
+        skip_result = _change_detection_skip_result(task, current_celery_id)
+        if skip_result is not None:
+            print(
+                "[worker] skip change detection "
+                f"task={task_id} reason={skip_result['reason']} "
+                f"status={task.status} celery_id={current_celery_id}",
+                flush=True,
+            )
+            return skip_result
 
         settings = get_settings()
         if task.started_at is None:
             task.started_at = datetime.now(timezone.utc)
         task.status = "running"
         task.progress = 5
-        current_celery_id = getattr(getattr(self, "request", None), "id", None)
         if current_celery_id:
             task.celery_task_id = current_celery_id
         db.commit()

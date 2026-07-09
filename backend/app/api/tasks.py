@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import secrets
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, or_, select
@@ -95,6 +96,10 @@ def _union_sheet_codes(datasets: list[DatasetORM]) -> set[str]:
     for dataset in datasets:
         out.update(dataset.sheet_codes or [])
     return out
+
+
+def _new_celery_task_id() -> str:
+    return str(uuid4())
 
 
 @router.get("", response_model=list[Task])
@@ -222,14 +227,20 @@ def create_task(payload: TaskCreatePayload, db: Session = Depends(get_db)) -> Ta
     try:
         from app.workers.tasks import run_change_detection
 
+        celery_task_id = _new_celery_task_id()
+        row.celery_task_id = celery_task_id
+        db.commit()
         async_result = run_change_detection.apply_async(
             args=[task_id],
             queue=settings.change_detection_queue,
+            task_id=celery_task_id,
         )
-        row.celery_task_id = async_result.id
+        row.celery_task_id = async_result.id or celery_task_id
         db.commit()
         db.refresh(row)
     except Exception as e:
+        row.celery_task_id = None
+        db.commit()
         # Celery worker 가 안 떠있어도 task row 는 남음 — 사용자가 재시도 가능.
         print(f"[create_task] Celery enqueue failed: {e}")
 
@@ -260,13 +271,13 @@ def start_task(task_id: str, db: Session = Depends(get_db)) -> Task:
                 }
             },
         )
-    if row.status == "running":
+    if row.status == "running" or (row.status == "pending" and row.celery_task_id):
         raise HTTPException(
             status_code=409,
             detail={
                 "error": {
                     "code": "BUSINESS_RULE_VIOLATION",
-                    "message": "이미 처리 중인 작업입니다",
+                    "message": "이미 처리 대기 중이거나 처리 중인 작업입니다",
                     "details": {"task_id": task_id, "status": row.status},
                 }
             },
@@ -292,13 +303,19 @@ def start_task(task_id: str, db: Session = Depends(get_db)) -> Task:
     try:
         from app.workers.tasks import run_change_detection
 
+        celery_task_id = _new_celery_task_id()
+        row.celery_task_id = celery_task_id
+        db.commit()
         async_result = run_change_detection.apply_async(
             args=[task_id],
             queue=settings.change_detection_queue,
+            task_id=celery_task_id,
         )
-        row.celery_task_id = async_result.id
+        row.celery_task_id = async_result.id or celery_task_id
         db.commit()
     except Exception as e:  # noqa: BLE001
+        row.celery_task_id = None
+        db.commit()
         # Celery 다운 시 task 는 pending 상태로 남음 — 사용자가 재시도 가능.
         print(f"[start_task] Celery enqueue failed: {e}")
 

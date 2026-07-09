@@ -107,6 +107,9 @@ export async function exportTaskAsShp(taskId: string): Promise<void> {
     if (relPath.toLowerCase().endsWith(".prj")) {
       archive.file(relPath, PRJ_5186);
     }
+    if (relPath.toLowerCase().endsWith(".dbf")) {
+      archive.file(relPath.replace(/\.dbf$/i, ".cpg"), "UTF-8");
+    }
   }
 
   const blob = archive.generate({ type: "blob" }) as Blob;
