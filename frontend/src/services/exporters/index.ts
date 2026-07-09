@@ -6,3 +6,9 @@ export {
   exportTaskAs3dDxf,
   exportTaskAsPdf,
 } from "./task";
+export {
+  createExportSaveTarget,
+  getDefaultTaskExportFilename,
+  isExportSaveCanceled,
+} from "./saveTarget";
+export type { ExportKind, ExportSaveTarget } from "./saveTarget";

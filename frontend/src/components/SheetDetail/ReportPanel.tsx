@@ -18,6 +18,11 @@ import {
   useSheetDetailStore,
 } from "@/stores/sheetDetailStore";
 import { Badge, Button, Tabs } from "@/components/Common";
+import {
+  createExportSaveTarget,
+  getDefaultTaskExportFilename,
+  isExportSaveCanceled,
+} from "@/services/exporters/saveTarget";
 import type { ChangeType, DetectionObject, ObjectCategory } from "@/types";
 import {
   CHANGE_TYPE_BY_CODE,
@@ -140,15 +145,25 @@ export function ReportPanel() {
     if (!taskId || downloadBusy) return;
     setDownloadBusy(true);
     const tid = `report-pdf-${taskId}`;
-    toast.loading("PDF 리포트 생성 중…", { id: tid });
+    toast.loading("PDF 리포트 저장 준비 중…", { id: tid });
     try {
+      const saveTarget = await createExportSaveTarget(
+        task
+          ? getDefaultTaskExportFilename(task, "pdf")
+          : `nbm_${taskId}_report.pdf`,
+        "pdf",
+      );
+      toast.loading("PDF 리포트 생성 중…", { id: tid });
       const mod = await import("@/services/exporters");
-      await mod.exportTaskAsPdf(taskId);
-      toast.success("PDF 리포트 다운로드 시작", { id: tid });
+      await mod.exportTaskAsPdf(taskId, undefined, saveTarget);
+      toast.success("PDF 리포트 저장 요청 완료", { id: tid });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "PDF 리포트 생성 실패", {
-        id: tid,
-      });
+      if (isExportSaveCanceled(err)) toast.dismiss(tid);
+      else {
+        toast.error(err instanceof Error ? err.message : "PDF 리포트 생성 실패", {
+          id: tid,
+        });
+      }
     } finally {
       setDownloadBusy(false);
     }

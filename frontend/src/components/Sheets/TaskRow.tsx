@@ -11,12 +11,16 @@ import {
   Map as MapIcon,
   Mountain,
   Pencil,
-  Play,
   Square,
   Trash2,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { Badge, Progress } from "@/components/Common";
+import {
+  createExportSaveTarget,
+  getDefaultTaskExportFilename,
+  isExportSaveCanceled,
+} from "@/services/exporters/saveTarget";
 import type { Task } from "@/types";
 import { formatDate, formatDateTime, formatNumber } from "@/utils/formatters";
 import { useSheetsStore } from "@/stores/sheetsStore";
@@ -31,7 +35,7 @@ import { EditTaskModal } from "./EditTaskModal";
  * - row 본체 / 작업명 클릭 → 지도를 해당 프로젝트의 union bbox 로 fly (네비게이션 X)
  * - row hover → 해당 sheet_codes 강조
  * - ✏️ 수정 버튼 → EditTaskModal
- * - ▶ 처리 / 👁 상세보기 버튼만 /tasks/:id 로 네비게이션
+ * - 처리 중단 / 상세보기 / 내보내기 버튼만 /tasks/:id 또는 해당 작업으로 연결
  */
 export interface TaskRowProps {
   task: Task;
@@ -209,7 +213,7 @@ export function TaskRow({ task, totalDetections }: TaskRowProps) {
         </div>
       ) : null}
 
-      {/* 행 4: 처리 시작/중단 + 상세보기 + 내보내기 */}
+      {/* 행 4: 처리 중단 + 상세보기 + 내보내기 */}
       <div
         className="flex items-center gap-1 mt-2 -mx-1"
         onClick={(e) => e.stopPropagation()}
@@ -224,20 +228,16 @@ export function TaskRow({ task, totalDetections }: TaskRowProps) {
             <Square size={11} />
             처리 중단
           </button>
-        ) : (
-          <button
-            type="button"
-            onClick={onOpenDetail}
-            className="inline-flex items-center gap-1 h-6 px-2 rounded text-[11px] font-bold text-blue-600 hover:bg-blue-50 transition-colors"
-          >
-            <Play size={11} />
-            처리 시작
-          </button>
-        )}
+        ) : null}
         <button
           type="button"
           onClick={onOpenDetail}
-          className="inline-flex items-center gap-1 h-6 px-2 rounded text-[11px] font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+          className={cn(
+            "inline-flex items-center gap-1 h-6 px-2 rounded text-[11px] font-bold transition-colors",
+            isRunning
+              ? "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
+              : "text-blue-600 hover:bg-blue-50",
+          )}
         >
           <Eye size={11} />
           상세보기
@@ -276,15 +276,21 @@ export function ExportMenu({ task }: { task: Task }) {
     setBusy(true);
     setOpen(false);
     const tid = `export-${task.id}-${kind}`;
-    toast.loading(`${kind.toUpperCase()} 생성 중…`, { id: tid });
+    toast.loading(`${kind.toUpperCase()} 저장 준비 중…`, { id: tid });
     try {
+      const saveTarget = await createExportSaveTarget(
+        getDefaultTaskExportFilename(task, kind),
+        kind,
+      );
+      toast.loading(`${kind.toUpperCase()} 생성 중…`, { id: tid });
       const mod = await import("@/services/exporters");
-      if (kind === "shp") await mod.exportTaskAsShp(task.id);
-      else if (kind === "dxf") await mod.exportTaskAsDxf(task.id);
-      else await mod.exportTaskAsPdf(task.id);
-      toast.success(`${kind.toUpperCase()} 다운로드 시작`, { id: tid });
+      if (kind === "shp") await mod.exportTaskAsShp(task.id, saveTarget);
+      else if (kind === "dxf") await mod.exportTaskAsDxf(task.id, saveTarget);
+      else await mod.exportTaskAsPdf(task.id, undefined, saveTarget);
+      toast.success(`${kind.toUpperCase()} 저장 요청 완료`, { id: tid });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "내보내기 실패", { id: tid });
+      if (isExportSaveCanceled(err)) toast.dismiss(tid);
+      else toast.error(err instanceof Error ? err.message : "내보내기 실패", { id: tid });
     } finally {
       setBusy(false);
     }
@@ -294,10 +300,15 @@ export function ExportMenu({ task }: { task: Task }) {
     setBusy(true);
     setOpen(false);
     const tid = `export-${task.id}-dxf3d`;
-    toast.loading("3D DXF 생성 중 — vertex 별 DEM 높이 적용", { id: tid });
+    toast.loading("3D DXF 저장 준비 중…", { id: tid });
     try {
+      const saveTarget = await createExportSaveTarget(
+        getDefaultTaskExportFilename(task, "dxf3d"),
+        "dxf3d",
+      );
+      toast.loading("3D DXF 생성 중 — vertex 별 DEM 높이 적용", { id: tid });
       const mod = await import("@/services/exporters");
-      const stats = await mod.exportTaskAs3dDxf(task.id);
+      const stats = await mod.exportTaskAs3dDxf(task.id, "CHANGE_DETECTION", saveTarget);
       const nodataNote =
         stats.objects_with_nodata.length > 0
           ? ` — ${stats.objects_with_nodata.length}개 객체에 NoData vertex 포함`
@@ -307,11 +318,12 @@ export function ExportMenu({ task }: { task: Task }) {
           ? ` (DEM 누락 도엽 ${stats.missing_sheets.length}건)`
           : "";
       toast.success(
-        `3D DXF 다운로드 — ${stats.total_objects}객체 / ${stats.sheets_used.length}도엽${missingNote}${nodataNote}`,
+        `3D DXF 저장 요청 완료 — ${stats.total_objects}객체 / ${stats.sheets_used.length}도엽${missingNote}${nodataNote}`,
         { id: tid, duration: 6000 },
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "3D DXF 실패", { id: tid });
+      if (isExportSaveCanceled(err)) toast.dismiss(tid);
+      else toast.error(err instanceof Error ? err.message : "3D DXF 실패", { id: tid });
     } finally {
       setBusy(false);
     }

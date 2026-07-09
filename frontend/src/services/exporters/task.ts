@@ -12,6 +12,8 @@ import {
   VISIBLE_CHANGE_TYPES,
 } from "@/utils/constants";
 import { convertPolygon4326to5186, PRJ_5186 } from "./proj";
+import { getTaskFilenameStem, saveExportBlob } from "./saveTarget";
+import type { ExportSaveTarget } from "./saveTarget";
 
 async function fetchTaskAndDetections(
   taskId: string,
@@ -21,11 +23,6 @@ async function fetchTaskAndDetections(
     listTaskDetections(taskId),
   ]);
   return { task, detections: detections.filter((d) => !d.is_deleted) };
-}
-
-function safeFilenameStem(task: Task): string {
-  // 한글·공백 등은 보존하지만 path 에서 위험한 문자는 제거.
-  return task.name.replace(/[\\/:*?"<>|]/g, "_") || task.id;
 }
 
 // ============================================================
@@ -40,30 +37,32 @@ function safeFilenameStem(task: Task): string {
 // detections 를 클라이언트 측에서 SHP 로 변환한다 — "프로젝트 결과물에 SHP 가
 // 없으면 변환해서 내보내기".
 // ============================================================
-export async function exportTaskAsShp(taskId: string): Promise<void> {
+export async function exportTaskAsShp(
+  taskId: string,
+  saveTarget?: ExportSaveTarget,
+): Promise<void> {
   const { task, detections } = await fetchTaskAndDetections(taskId);
 
   if (detections.length === 0) {
     throw new Error("내보낼 변화탐지 객체가 없습니다");
   }
 
-  const features = detections.map((d) => {
+  const features = detections.map((d, index) => {
     const coords5186 = convertPolygon4326to5186(d.geometry.coordinates);
     return {
       type: "Feature" as const,
       properties: {
-        ID: d.id,
-        SHEET: d.sheet_code,
-        MODEL: d.model,
-        CHANGE: d.change_type,
-        CHANGE_KO: CHANGE_TYPE_BY_CODE[d.change_type].label,
+        NO: index + 1,
+        MAP_IDX: d.sheet_code,
+        CLASS: OBJECT_CATEGORY_LABEL[d.model],
+        TYPE: d.change_type,
+        TYPE_KO: CHANGE_TYPE_BY_CODE[d.change_type].label,
         CONF: d.confidence,
         AREA_M2: d.area_m2,
-        MEMO: d.reviewer_memo,
-        REVIEWER: d.reviewed_by ?? "",
-        REVIEWED: d.reviewed_at ?? "",
         REGION: d.region_code,
-        ADDRESS: d.address,
+        ADDR: d.address,
+        MEMO: d.reviewer_memo,
+        OBJ_ID: d.id,
       },
       geometry: {
         type: "Polygon" as const,
@@ -77,7 +76,7 @@ export async function exportTaskAsShp(taskId: string): Promise<void> {
     features,
   };
 
-  const stem = safeFilenameStem(task);
+  const stem = getTaskFilenameStem(task);
   const folder = `nbm_${stem}`;
   const layerName = `nbm_${stem}_detections`;
 
@@ -113,7 +112,7 @@ export async function exportTaskAsShp(taskId: string): Promise<void> {
   }
 
   const blob = archive.generate({ type: "blob" }) as Blob;
-  triggerDownload(blob, `${folder}.zip`);
+  await saveExportBlob(blob, `${folder}.zip`, "shp", saveTarget);
 }
 
 // ============================================================
@@ -164,6 +163,7 @@ function mapExport3dError(status: number, body: Export3dErrorBody): string {
 export async function exportTaskAs3dDxf(
   taskId: string,
   layerName: string = "CHANGE_DETECTION",
+  saveTarget?: ExportSaveTarget,
 ): Promise<Export3dStatistics> {
   const base = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "") || "/api/v1";
 
@@ -189,7 +189,7 @@ export async function exportTaskAs3dDxf(
     throw new Error(`3D DXF 파일 다운로드 실패: HTTP ${dl.status}`);
   }
   const blob = await dl.blob();
-  triggerDownload(blob, data.filename);
+  await saveExportBlob(blob, data.filename, "dxf3d", saveTarget);
 
   return data.statistics;
 }
@@ -197,7 +197,10 @@ export async function exportTaskAs3dDxf(
 // ============================================================
 // DXF — dxf-writer
 // ============================================================
-export async function exportTaskAsDxf(taskId: string): Promise<void> {
+export async function exportTaskAsDxf(
+  taskId: string,
+  saveTarget?: ExportSaveTarget,
+): Promise<void> {
   const { task, detections } = await fetchTaskAndDetections(taskId);
 
   const Drawing = (await import("dxf-writer")).default as unknown as {
@@ -234,10 +237,12 @@ export async function exportTaskAsDxf(taskId: string): Promise<void> {
     drawing.drawPolyline(points, true);
   }
 
-  const stem = safeFilenameStem(task);
-  triggerDownload(
+  const stem = getTaskFilenameStem(task);
+  await saveExportBlob(
     new Blob([drawing.toDxfString()], { type: "application/dxf" }),
     `nbm_${stem}.dxf`,
+    "dxf",
+    saveTarget,
   );
 }
 
@@ -247,6 +252,7 @@ export async function exportTaskAsDxf(taskId: string): Promise<void> {
 export async function exportTaskAsPdf(
   taskId: string,
   sourceElement?: HTMLElement,
+  saveTarget?: ExportSaveTarget,
 ): Promise<void> {
   const { task, detections: rawDetections } = await fetchTaskAndDetections(taskId);
   const visibleCodes = new Set(VISIBLE_CHANGE_TYPES.map((item) => item.code));
@@ -283,7 +289,12 @@ export async function exportTaskAsPdf(
       doc.addImage(canvas.toDataURL("image/png"), "PNG", x, 0, imgWidth, imgHeight);
     }
 
-    doc.save(`nbm_${safeFilenameStem(task)}_report.pdf`);
+    await saveExportBlob(
+      doc.output("blob"),
+      `nbm_${getTaskFilenameStem(task)}_report.pdf`,
+      "pdf",
+      saveTarget,
+    );
   } finally {
     reports.forEach((report) => report.remove());
   }
@@ -572,15 +583,4 @@ function escapeHtml(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
-}
-
-function triggerDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
