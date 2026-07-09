@@ -292,7 +292,7 @@ export function TaskRow({ task, totalDetections }: TaskRowProps) {
 }
 
 // ============================================================
-// 내보내기 드롭다운 — 형식 선택 후 OS 저장 탐색기 호출
+// 내보내기 드롭다운 — 지원 브라우저는 OS 저장 탐색기, 미지원 브라우저는 다운로드 fallback.
 // ============================================================
 export function ExportMenu({ task }: { task: Task }) {
   const [open, setOpen] = useState(false);
@@ -485,7 +485,7 @@ function ExportFallbackDialog({
       onOpenChange={(nextOpen) => {
         if (!nextOpen && !busy) onClose();
       }}
-      title="저장 위치 선택 불가"
+      title="브라우저 다운로드로 저장"
       icon={<Download size={20} />}
       width={560}
       blockDismiss={busy}
@@ -505,12 +505,12 @@ function ExportFallbackDialog({
         </>
       }
     >
-      <ModalDescription>현재 접속 환경에서는 OS 저장 탐색기를 열 수 없음</ModalDescription>
+      <ModalDescription>현재 접속 환경에서는 OS 저장 탐색기 대신 브라우저 다운로드 사용</ModalDescription>
 
       <div className="space-y-4">
         <div className="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          현재 브라우저 또는 접속 주소에서는 로컬 저장 탐색기를 열 수 없습니다.
-          Chrome/Edge에서 `localhost` 또는 HTTPS 주소로 접속하면 형식 선택 후 바로 저장 탐색기가 열립니다.
+          Firefox/Safari 또는 보안 연결이 아닌 주소에서는 로컬 저장 탐색기를 열 수 없습니다.
+          이 경우 파일명만 확인한 뒤 브라우저 다운로드 설정에 따라 저장됩니다.
         </div>
 
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
