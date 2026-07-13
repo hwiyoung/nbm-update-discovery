@@ -26,6 +26,8 @@ import {
 import { cn } from "@/utils/cn";
 
 const KOREA_CENTER: [number, number] = [36.35, 127.8];
+const DRAWN_RANGE_COLOR = "#dc2626";
+const DRAWN_RANGE_FILL = "#ef4444";
 const GUIDE_COLORS = [
   "#0f766e",
   "#7c3aed",
@@ -112,11 +114,11 @@ export function OrthoMap({
           <Rectangle
             bounds={bboxToLeafletBounds(drawnBBox)}
             pathOptions={{
-              color: "#2563eb",
+              color: DRAWN_RANGE_COLOR,
               weight: 2,
               opacity: 1,
               dashArray: "6 4",
-              fillColor: "#3b82f6",
+              fillColor: DRAWN_RANGE_FILL,
               fillOpacity: 0.12,
             }}
           />
@@ -198,11 +200,11 @@ function RectangleDrawController({
       start = event.latlng;
       clearPreview();
       previewRef.current = L.rectangle(L.latLngBounds(start, start), {
-        color: "#2563eb",
+        color: DRAWN_RANGE_COLOR,
         weight: 2.5,
         opacity: 1,
         dashArray: "6 4",
-        fillColor: "#3b82f6",
+        fillColor: DRAWN_RANGE_FILL,
         fillOpacity: 0.18,
       }).addTo(map);
       L.DomEvent.stop(event.originalEvent);
@@ -471,7 +473,7 @@ function MapLegend({
             </LegendItem>
           </>
         ) : null}
-        <LegendItem className="border-dashed border-blue-600 bg-blue-500/10">
+        <LegendItem className="border-dashed border-red-600 bg-red-500/10">
           지정 범위
         </LegendItem>
       </div>

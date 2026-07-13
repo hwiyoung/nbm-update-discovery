@@ -1,4 +1,5 @@
 import type { CompareType, ObjectCategory } from "./sheet";
+import type { MultiPolygon, Polygon } from "geojson";
 
 /**
  * 변화탐지 작업 (Task) — 1 작업이 N 도엽을 포함.
@@ -29,6 +30,9 @@ export interface Task {
   progress_message: string | null;
   progress_stage: string | null;
   progress_detail: Record<string, unknown> | null;
+  /** 입력 영상 묶음 양쪽의 합집합을 교차한 실제 처리영역 (EPSG:4326). */
+  processing_geometry?: Polygon | MultiPolygon | null;
+  processing_area_m2?: number | null;
   progress_updated_at: string | null;
   created_at: string;
   started_at: string | null;

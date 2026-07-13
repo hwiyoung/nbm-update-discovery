@@ -23,7 +23,7 @@ from threading import Event
 from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 
 from app.config import get_settings
 from app.database import SessionLocal
@@ -42,8 +42,6 @@ from app.services.task_artifacts import (
 from app.services.task_progress import write_task_progress
 from app.utils.geo import bbox_from_geometry, geojson_4326_to_5186_wkt, wkb_to_geojson_4326
 from app.workers.celery_app import celery_app
-
-from sqlalchemy import delete
 
 # Legacy mock engine import. The real algorithm runtime is resolved from
 # CHANGE_DETECTION_ALGORITHM_ROOT in app.services.change_detection_engine.
@@ -125,10 +123,30 @@ def _change_detection_skip_result(
             "skipped": True,
             "reason": "terminal_status",
         }
+    if task.status != "pending":
+        return {
+            "status": task.status,
+            "task_id": task.id,
+            "skipped": True,
+            "reason": "not_pending",
+        }
+    if not current_celery_id:
+        return {
+            "status": task.status,
+            "task_id": task.id,
+            "skipped": True,
+            "reason": "missing_celery_task_id",
+        }
+    if not task.celery_task_id:
+        return {
+            "status": task.status,
+            "task_id": task.id,
+            "skipped": True,
+            "reason": "missing_expected_celery_task_id",
+            "current_celery_id": current_celery_id,
+        }
     if (
-        current_celery_id
-        and task.celery_task_id
-        and task.celery_task_id != current_celery_id
+        task.celery_task_id != current_celery_id
     ):
         return {
             "status": task.status,
@@ -139,6 +157,38 @@ def _change_detection_skip_result(
             "expected_celery_task_id": task.celery_task_id,
         }
     return None
+
+
+def _claim_change_detection_task(
+    db: Any,
+    task_id: str,
+    current_celery_id: str,
+) -> bool:
+    """pending 작업을 현재 Celery delivery가 한 번만 점유한다.
+
+    조건부 UPDATE 자체가 동시성 경계다. 같은 메시지가 두 번 전달되거나 서로
+    다른 worker가 동시에 진입해도 한 호출만 pending -> running 전이에 성공한다.
+    """
+    claimed_id = db.scalar(
+        update(TaskORM)
+        .where(
+            TaskORM.id == task_id,
+            TaskORM.status == "pending",
+            TaskORM.celery_task_id == current_celery_id,
+        )
+        .values(
+            status="running",
+            progress=5,
+            started_at=datetime.now(timezone.utc),
+            finished_at=None,
+        )
+        .returning(TaskORM.id)
+    )
+    if claimed_id is None:
+        db.rollback()
+        return False
+    db.commit()
+    return True
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -342,7 +392,11 @@ def _task_side_tile_path(
     return str(vrt_path)
 
 
-@celery_app.task(bind=True, name="nbm.run_change_detection")
+@celery_app.task(
+    bind=True,
+    name="nbm.run_change_detection",
+    acks_late=True,
+)
 def run_change_detection(self, task_id: str) -> dict[str, Any]:
     """변화탐지 작업 실행 — 실제 알고리즘 결과를 DB INSERT."""
     db = SessionLocal()
@@ -361,14 +415,27 @@ def run_change_detection(self, task_id: str) -> dict[str, Any]:
             )
             return skip_result
 
+        assert current_celery_id is not None
+        if not _claim_change_detection_task(db, task_id, current_celery_id):
+            latest = db.get(TaskORM, task_id)
+            latest_status = latest.status if latest is not None else "missing"
+            print(
+                "[worker] skip change detection "
+                f"task={task_id} reason=claim_rejected "
+                f"status={latest_status} celery_id={current_celery_id}",
+                flush=True,
+            )
+            return {
+                "status": latest_status,
+                "task_id": task_id,
+                "skipped": True,
+                "reason": "claim_rejected",
+            }
+
         settings = get_settings()
-        if task.started_at is None:
-            task.started_at = datetime.now(timezone.utc)
-        task.status = "running"
-        task.progress = 5
-        if current_celery_id:
-            task.celery_task_id = current_celery_id
-        db.commit()
+        task = db.get(TaskORM, task_id)
+        if task is None:  # claim 직후 삭제되는 극단적 경합 방어
+            return {"status": "failed", "error": "task not found after claim"}
         write_task_progress(
             settings,
             task_id,

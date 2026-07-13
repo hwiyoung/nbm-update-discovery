@@ -3,7 +3,7 @@ import type { Task } from "@/types";
 export type ExportKind = "shp" | "dxf" | "dxf3d" | "pdf";
 
 export interface ExportSaveTarget {
-  save(blob: Blob, fallbackFilename?: string): Promise<void>;
+  save(blob: Blob): Promise<void>;
 }
 
 interface SaveFilePickerType {
@@ -44,20 +44,36 @@ class ExportSaveCanceledError extends Error {
   }
 }
 
-export function getTaskFilenameStem(task: Pick<Task, "id" | "name">): string {
-  // 한글·공백 등은 보존하지만 path 에서 위험한 문자는 제거.
-  return task.name.replace(/[\\/:*?"<>|]/g, "_") || task.id;
+export function getTaskFilenameStem(task: Pick<Task, "id" | "created_at">): string {
+  const createdAt = new Date(task.created_at);
+  if (Number.isNaN(createdAt.getTime())) {
+    return task.id.replace(/[\\/:*?"<>|]/g, "_") || "project";
+  }
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(createdAt);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "00";
+  return `${value("year")}${value("month")}${value("day")}_${value("hour")}${value("minute")}${value("second")}`;
 }
 
 export function getDefaultTaskExportFilename(
-  task: Pick<Task, "id" | "name">,
+  task: Pick<Task, "id" | "created_at">,
   kind: ExportKind,
 ): string {
   const stem = getTaskFilenameStem(task);
-  if (kind === "shp") return `nbm_${stem}.zip`;
-  if (kind === "dxf") return `nbm_${stem}.dxf`;
-  if (kind === "dxf3d") return `nbm_${stem}_3d.dxf`;
-  return `nbm_${stem}_report.pdf`;
+  if (kind === "shp") return `${stem}.zip`;
+  if (kind === "dxf") return `${stem}_2d.dxf`;
+  if (kind === "dxf3d") return `${stem}_3d.dxf`;
+  return `${stem}_report.pdf`;
 }
 
 export function isExportSaveCanceled(err: unknown): boolean {
@@ -103,8 +119,10 @@ export async function createExportSaveTarget(
   }
 
   return {
-    async save(blob: Blob, fallbackFilename?: string): Promise<void> {
-      triggerDownload(blob, fallbackFilename ?? suggestedName);
+    async save(blob: Blob): Promise<void> {
+      // fallback modal에서 사용자가 수정한 suggestedName을 exporter의 내부 파일명보다
+      // 우선한다. 그래야 입력한 파일명이 실제 브라우저 다운로드명에 그대로 반영된다.
+      triggerDownload(blob, suggestedName);
     },
   };
 }
@@ -116,11 +134,11 @@ export async function saveExportBlob(
   saveTarget?: ExportSaveTarget,
 ): Promise<void> {
   if (saveTarget) {
-    await saveTarget.save(blob, filename);
+    await saveTarget.save(blob);
     return;
   }
   const target = await createExportSaveTarget(filename, kind);
-  await target.save(blob, filename);
+  await target.save(blob);
 }
 
 function triggerDownload(blob: Blob, filename: string): void {

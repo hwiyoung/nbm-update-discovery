@@ -61,6 +61,7 @@ services:
       - HOST_ORTHOMOSAIC_DIR=${HOST_ORTHOMOSAIC_DIR:-}
       # 실제 알고리즘은 별도 GPU 워커의 engine 큐에서 처리.
       - CHANGE_DETECTION_QUEUE=${CHANGE_DETECTION_QUEUE:-engine}
+      - CHANGE_DETECTION_VISIBILITY_TIMEOUT_S=${CHANGE_DETECTION_VISIBILITY_TIMEOUT_S:-259200}
       - CHANGE_DETECTION_ENGINE_MODE=${CHANGE_DETECTION_ENGINE_MODE:-algorithm}
       - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/pm}
       - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
@@ -156,6 +157,7 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - PYTHONPATH=/app
       - CHANGE_DETECTION_QUEUE=${CHANGE_DETECTION_QUEUE:-engine}
+      - CHANGE_DETECTION_VISIBILITY_TIMEOUT_S=${CHANGE_DETECTION_VISIBILITY_TIMEOUT_S:-259200}
       - CHANGE_DETECTION_ENGINE_MODE=${CHANGE_DETECTION_ENGINE_MODE:-algorithm}
       - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/pm}
       - CHANGE_DETECTION_WORKSPACE_ROOT=${CHANGE_DETECTION_WORKSPACE_ROOT:-/data/storage/exports}
@@ -208,12 +210,13 @@ services:
       context: ./backend
       dockerfile: Dockerfile.engine
     working_dir: /app
-    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info --concurrency=1 -Q engine -n engine@%h
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info --concurrency=1 --prefetch-multiplier=1 -Q engine -n engine@%h
     shm_size: ${CHANGE_DETECTION_SHM_SIZE:-16gb}
     gpus: all
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg2://nbm:nbm_dev_change_me@postgres:5432/nbm}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - CHANGE_DETECTION_VISIBILITY_TIMEOUT_S=${CHANGE_DETECTION_VISIBILITY_TIMEOUT_S:-259200}
       - PYTHONPATH=/app:/root/urban_cd_v1/common/src:/root/urban_cd_v1/road_cd/scripts:/root/urban_cd_v1/building_cd/phase3_semantic_cd/src:/root/urban_cd_v1
       - CHANGE_DETECTION_ENGINE_MODE=algorithm
       - CHANGE_DETECTION_ALGORITHM_ROOT=${CHANGE_DETECTION_ALGORITHM_ROOT:-/engines/pm}

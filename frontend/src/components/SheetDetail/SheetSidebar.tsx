@@ -1,7 +1,11 @@
 import {
   ArrowLeft,
+  Check,
   CheckCircle2,
+  ChevronDown,
+  Copy,
   FileText,
+  Fingerprint,
   Loader2,
   PauseCircle,
   Play,
@@ -9,7 +13,7 @@ import {
   Square,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import {
   useCanCompleteSheet,
@@ -39,6 +43,102 @@ const TASK_STATUS_BADGE: Record<
   failed: { label: "추론 실패", tone: "red" },
   canceled: { label: "중단됨", tone: "amber" },
 };
+
+async function copyText(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  // LAN HTTP 환경에서는 Clipboard API가 비활성화될 수 있어 legacy fallback 유지.
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("clipboard unavailable");
+}
+
+function ProjectIdPopover({ projectId }: { projectId: string }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const onCopy = async () => {
+    try {
+      await copyText(projectId);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      toast.error("프로젝트 ID를 복사하지 못했습니다");
+    }
+  };
+
+  return (
+    <div ref={rootRef} className="relative mt-1">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen((current) => !current)}
+        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+      >
+        <Fingerprint size={12} />
+        프로젝트 ID
+        <ChevronDown
+          size={11}
+          className={open ? "rotate-180 transition-transform" : "transition-transform"}
+        />
+      </button>
+
+      {open ? (
+        <div
+          role="dialog"
+          aria-label="프로젝트 ID"
+          className="absolute left-0 top-full z-[600] mt-1 w-[360px] max-w-[calc(100vw-32px)] rounded-lg border border-slate-200 bg-white p-3 shadow-lg"
+        >
+          <div className="mb-1.5 text-[11px] font-semibold text-slate-500">
+            프로젝트 ID
+          </div>
+          <div className="flex items-center gap-2 rounded-md bg-slate-50 px-2.5 py-2">
+            <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-[11px] leading-4 text-slate-700">
+              {projectId}
+            </code>
+            <button
+              type="button"
+              onClick={() => void onCopy()}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 transition-colors hover:border-blue-300 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              aria-label="프로젝트 ID 복사"
+            >
+              {copied ? <Check size={12} /> : <Copy size={12} />}
+              {copied ? "복사됨" : "복사"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * 좌 사이드바 — 380px 고정.
@@ -141,12 +241,15 @@ export function SheetSidebar() {
 
         <div className="flex items-start justify-between gap-2 mb-1">
           <div className="min-w-0">
-            <div className="text-xs font-bold text-slate-400 mb-0.5">
-              {formatSheetCode(sheet.code)}
-            </div>
+            {!isTaskMode ? (
+              <div className="text-xs font-bold text-slate-400 mb-0.5">
+                {formatSheetCode(sheet.code)}
+              </div>
+            ) : null}
             <h1 className="text-base font-bold text-slate-800 truncate">
               {sheet.name}
             </h1>
+            {isTaskMode ? <ProjectIdPopover projectId={task.id} /> : null}
             <div className="text-xs text-slate-500 mt-0.5">
               {sheet.region} · {sheet.area_km2.toFixed(2)} km²
             </div>

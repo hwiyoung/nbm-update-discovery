@@ -150,7 +150,7 @@ export function ReportPanel() {
       const saveTarget = await createExportSaveTarget(
         task
           ? getDefaultTaskExportFilename(task, "pdf")
-          : `nbm_${taskId}_report.pdf`,
+          : `${taskId}_report.pdf`,
         "pdf",
       );
       toast.loading("PDF 리포트 생성 중…", { id: tid });

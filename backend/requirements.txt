@@ -27,6 +27,8 @@ rasterio==1.3.10
 ezdxf==1.3.5
 # 3D DXF export — sheet index sindex + GPKG I/O
 geopandas==0.14.4
+# 2D SHP export — UTF-8 DBF와 EPSG:5186 sidecar 직접 생성.
+fiona==1.10.1
 # GDAL Python 바인딩 — dem_z_export.gdal.BuildVRT 사용.
 # 버전은 Dockerfile 의 libgdal-dev 와 매칭해야 하므로 본 파일에 고정하지 않고
 # Dockerfile RUN 에서 `pip install GDAL==$(gdal-config --version)` 으로 설치.

@@ -3,7 +3,11 @@ import { create } from "zustand";
 import type { Dataset, DatasetFilter, ObjectCategory } from "@/types";
 import type { BBox, OrthoGroup } from "@/types/mapProject";
 import { deleteDataset as apiDeleteDataset, listDatasets } from "@/api/client";
-import { toggleCurrentInGroups, togglePastInGroups } from "@/utils/mapProject";
+import {
+  clearOrthoSelections,
+  toggleCurrentInGroups,
+  togglePastInGroups,
+} from "@/utils/mapProject";
 
 /**
  * /datasets 화면 + 위저드 상태.
@@ -109,6 +113,7 @@ interface DatasetsState {
   setWizardHoveredOrtho: (id: string | null) => void;
   toggleWizardPast: (pastId: string) => void;
   toggleWizardCurrent: (currentId: string) => void;
+  clearWizardSelections: () => void;
   resetWizard: () => void;
 
   openUpload: () => void;
@@ -246,6 +251,14 @@ export const useDatasetsStore = create<DatasetsState>((set) => ({
       wizardSelection: {
         ...state.wizardSelection,
         groups: toggleCurrentInGroups(state.wizardSelection.groups, currentId),
+      },
+    })),
+  clearWizardSelections: () =>
+    set((state) => ({
+      wizardSelection: {
+        ...state.wizardSelection,
+        groups: clearOrthoSelections(state.wizardSelection.groups),
+        hoveredOrthoId: null,
       },
     })),
   resetWizard: () =>

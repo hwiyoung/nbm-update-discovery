@@ -140,12 +140,21 @@ export function toggleCurrentInGroups(
   groups: OrthoGroup[],
   currentId: string,
 ): OrthoGroup[] {
+  const nextIncluded = !groups.some((group) =>
+    group.currents.some(
+      (current) => current.id === currentId && current.included,
+    ),
+  );
   return groups.map((group) => {
     return recalculateGroup({
       ...group,
+      past:
+        nextIncluded && group.past.id === currentId
+          ? { ...group.past, included: false }
+          : group.past,
       currents: group.currents.map((current) =>
         current.id === currentId
-          ? { ...current, included: !current.included }
+          ? { ...current, included: nextIncluded }
           : current,
       ),
     });
@@ -156,13 +165,39 @@ export function togglePastInGroups(
   groups: OrthoGroup[],
   pastId: string,
 ): OrthoGroup[] {
+  const nextIncluded = !groups.some(
+    (group) => group.past.id === pastId && group.past.included,
+  );
   return groups.map((group) => {
-    if (group.past.id !== pastId) return group;
     return recalculateGroup({
       ...group,
-      past: { ...group.past, included: !group.past.included },
+      past:
+        group.past.id === pastId
+          ? { ...group.past, included: nextIncluded }
+          : group.past,
+      currents: nextIncluded
+        ? group.currents.map((current) =>
+            current.id === pastId
+              ? { ...current, included: false }
+              : current,
+          )
+        : group.currents,
     });
   });
+}
+
+/** 자동 추천을 포함한 과년도/당해년도 선택을 모두 해제한다. */
+export function clearOrthoSelections(groups: OrthoGroup[]): OrthoGroup[] {
+  return groups.map((group) =>
+    recalculateGroup({
+      ...group,
+      past: { ...group.past, included: false },
+      currents: group.currents.map((current) => ({
+        ...current,
+        included: false,
+      })),
+    }),
+  );
 }
 
 export function selectedOrthoPairs(groups: OrthoGroup[]): OrthoPair[] {
@@ -208,35 +243,12 @@ export function selectedOrthoComposite(
 }
 
 export function allOrthoFeatures(groups: OrthoGroup[]): OrthoImage[] {
-  const features = new Map<string, OrthoPast | OrthoCurrent>();
+  // buildOrthoGroupsFromDatasets 는 조회된 각 dataset 을 정확히 한 번씩
+  // group.past 로 만든다. 다른 group 의 current 복사본까지 합치면 당해년도
+  // 선택 상태가 같은 dataset 의 과년도 체크 상태로 번지는 문제가 생긴다.
+  const features = new Map<string, OrthoPast>();
   for (const group of groups) {
     features.set(group.past.id, group.past);
-    for (const current of group.currents) {
-      const previous = features.get(current.id);
-      if (!previous) {
-        features.set(current.id, current);
-      } else {
-        const previousIncluded = (previous as { included?: boolean }).included === true;
-        const currentIncluded = current.included === true;
-        const merged = {
-          ...previous,
-          era:
-            previous.era === "current" && !previousIncluded && currentIncluded
-              ? "current"
-              : previous.era,
-          ...(previous.era === "past"
-            ? { included: previousIncluded || currentIncluded }
-            : {
-                included: previousIncluded || currentIncluded,
-                overlap: Math.max(
-                  (previous as OrthoCurrent).overlap ?? 0,
-                  current.overlap,
-                ),
-              }),
-        } as OrthoPast | OrthoCurrent;
-        features.set(current.id, merged);
-      }
-    }
   }
   return Array.from(features.values()).sort(compareOrthoImages);
 }
