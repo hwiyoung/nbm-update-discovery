@@ -1,7 +1,7 @@
 {
   "name": "nbm-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.2.0",
   "type": "module",
   "description": "변화탐지 검수 플랫폼 — 프론트엔드",
   "scripts": {

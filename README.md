@@ -273,6 +273,13 @@ docker compose down -v
 
 새 운영 서버 설치 순서와 `.env.prod` 작성 방법은 `docs/DEPLOY_INSTALL_GUIDE.md`를 따른다.
 
+### 버전과 릴리즈
+
+제품 버전은 루트 `VERSION`을 기준으로 [Semantic Versioning](https://semver.org/)을 따른다.
+프론트엔드 패키지 버전, 백엔드 `APP_VERSION`, 운영 Docker 이미지 태그는 릴리즈할 때 같은 값으로 맞춘다.
+주요 변경 사항은 `CHANGELOG.md`에 기록하고, 운영 배포 기준 커밋에 `vX.Y.Z` annotated tag와 GitHub Release를 생성한다.
+이미 생성한 릴리즈 태그는 이동하거나 덮어쓰지 않으며, 운영 롤백은 이전 버전 이미지로 수행한다.
+
 다른 서버에 배포할 때는 `.env.prod.example`을 `.env.prod`로 복사한 뒤 호스트 경로와 비밀값을 먼저 바꾼다.
 
 ```bash

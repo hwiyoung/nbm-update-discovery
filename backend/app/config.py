@@ -10,6 +10,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # Product release version. Production injects this from APP_VERSION.
+    app_version: str = "dev"
+
     # DB / Cache
     database_url: str = (
         "postgresql+psycopg2://nbm:nbm_dev_change_me@postgres:5432/nbm"

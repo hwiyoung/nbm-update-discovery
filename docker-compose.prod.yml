@@ -2,7 +2,7 @@ name: ${COMPOSE_PROJECT_NAME:-nbm_update}
 
 services:
   frontend:
-    image: nbm-update-discovery-frontend-prod
+    image: nbm-update-discovery-frontend-prod:${APP_VERSION:-dev}
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
@@ -19,7 +19,7 @@ services:
         condition: service_started
 
   backend:
-    image: nbm-update-discovery-backend-prod
+    image: nbm-update-discovery-backend-prod:${APP_VERSION:-dev}
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
@@ -33,6 +33,7 @@ services:
     expose:
       - "8000"
     environment:
+      - APP_VERSION=${APP_VERSION:-dev}
       - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg2://nbm:nbm_dev_change_me@postgres:5432/nbm}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - JWT_SECRET=${JWT_SECRET:-__replace_in_production__}
@@ -108,7 +109,7 @@ services:
       start_period: 40s
 
   celery-worker:
-    image: nbm-update-discovery-backend-prod
+    image: nbm-update-discovery-backend-prod:${APP_VERSION:-dev}
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
@@ -118,6 +119,7 @@ services:
       --loglevel=info
       --concurrency=${CELERY_CONCURRENCY:-2}
     environment:
+      - APP_VERSION=${APP_VERSION:-dev}
       - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg2://nbm:nbm_dev_change_me@postgres:5432/nbm}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - PYTHONPATH=/app
@@ -171,7 +173,7 @@ services:
         condition: service_healthy
 
   celery-engine-worker:
-    image: nbm-update-discovery-celery-engine-worker-prod
+    image: nbm-update-discovery-celery-engine-worker-prod:${APP_VERSION:-dev}
     build:
       context: ./backend
       dockerfile: Dockerfile.engine
@@ -180,6 +182,7 @@ services:
     shm_size: ${CHANGE_DETECTION_SHM_SIZE:-16gb}
     gpus: all
     environment:
+      - APP_VERSION=${APP_VERSION:-dev}
       - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg2://nbm:nbm_dev_change_me@postgres:5432/nbm}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - CHANGE_DETECTION_VISIBILITY_TIMEOUT_S=${CHANGE_DETECTION_VISIBILITY_TIMEOUT_S:-259200}

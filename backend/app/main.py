@@ -73,14 +73,15 @@ async def lifespan(app: FastAPI):
             pass
 
 
+_settings = get_settings()
+
 app = FastAPI(
     title="변화탐지 플랫폼 API",
-    version="0.5.0",
+    version=_settings.app_version,
     description="공간정보품질관리원 — AI 변화탐지 처리 플랫폼",
     lifespan=lifespan,
 )
 
-_settings = get_settings()
 # dev: regex 로 localhost / 127.0.0.1 / LAN IP (192.168.x.x, 10.x.x.x) 허용.
 # allow_credentials=True 와 wildcard("*") 는 호환되지 않아 정규식 사용.
 app.add_middleware(
@@ -94,13 +95,14 @@ app.add_middleware(
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "version": _settings.app_version}
 
 
 @app.get("/")
 def root() -> dict[str, str]:
     return {
         "service": "nbm-backend",
+        "version": _settings.app_version,
         "milestone": "5",
         "docs": "/docs",
         "health": "/health",
