@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     # Change detection engine
     # mock: 기존 경량 mock 엔진 사용. algorithm: 실제 도로/건물 변화탐지 알고리즘 사용.
     change_detection_queue: str = "engine"
+    # Redis 기본 visibility timeout(1시간)보다 긴 변화탐지 작업이 앞에 있을 때
+    # 뒤 작업의 예약 메시지가 재전달되지 않도록 최대 예상 실행시간보다 길게 둔다.
+    change_detection_visibility_timeout_s: int = 72 * 60 * 60
     change_detection_engine_mode: str = "algorithm"
     change_detection_algorithm_root: str = "/engines/pm"
     change_detection_workspace_root: str = "/data/storage/exports"

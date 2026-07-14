@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.models.dataset import DatasetORM
-from app.services.orthomosaic_registry import _apply_current_metadata
+from app.services.orthomosaic_registry import _apply_current_metadata, _parse_taken_at
 from app.services.serializers import _dataset_capture_year
 
 
@@ -53,3 +53,12 @@ def test_registry_metadata_refresh_preserves_manual_upload_source(tmp_path: Path
     _apply_current_metadata(row, path, "POLYGON ((0 0, 1 0, 1 1, 0 0))", ["A"])
 
     assert row.source == "upload"
+
+
+def test_registry_taken_at_reads_leading_four_digit_year(tmp_path: Path):
+    path = tmp_path / "2024_Asan_clip_1.tif"
+    path.write_bytes(b"fake")
+
+    taken_at = _parse_taken_at(path)
+
+    assert taken_at == datetime(2024, 1, 1, tzinfo=timezone.utc)

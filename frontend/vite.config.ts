@@ -9,8 +9,7 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
-  // shp-write/zip.js 의 `if (!process.browser)` 같은 Node.js 잔재가 브라우저에서
-  // ReferenceError: process is not defined 를 일으키지 않도록 폴리필.
+  // 일부 레거시 브라우저 의존성의 Node.js 환경 참조를 위한 최소 폴리필.
   define: {
     "process.browser": "true",
     "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV ?? "development"),

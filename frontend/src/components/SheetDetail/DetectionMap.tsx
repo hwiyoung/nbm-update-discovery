@@ -22,7 +22,7 @@ import type {
 } from "leaflet";
 import L from "leaflet";
 import "leaflet-draw";
-import type { Feature, FeatureCollection, Polygon } from "geojson";
+import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import {
   useFilteredDetections,
   useSheetDetailStore,
@@ -30,7 +30,7 @@ import {
 } from "@/stores/sheetDetailStore";
 import { CHANGE_TYPE_BY_CODE } from "@/utils/constants";
 import { bboxToLeafletBounds } from "@/utils/geoUtils";
-import type { DetectionObject } from "@/types";
+import type { Dataset, DetectionObject } from "@/types";
 import { ViewerModeToolbar } from "./ViewerModeToolbar";
 import { MapToolbar } from "./MapToolbar";
 import { cn } from "@/utils/cn";
@@ -68,12 +68,20 @@ function rightPanelInset(mode: RightPanelMode): number {
 
 export function DetectionMap() {
   const sheet = useSheetDetailStore((s) => s.sheet)!;
+  const processingGeometry = useSheetDetailStore(
+    (s) => s.task?.processing_geometry ?? null,
+  );
   const mode = useSheetDetailStore((s) => s.viewerMode);
   const rightPanel = useSheetDetailStore((s) => s.rightPanel);
   const panelInset = rightPanelInset(rightPanel);
   // view state 를 DetectionMap 에서 보유 → 모드 컴포넌트가 unmount 돼도 보존.
   // 모드 전환 시 새 컴포넌트가 같은 view 로 mount.
   const [view, setView] = useState<ViewState | null>(null);
+  const processingExtent = useMemo(
+    () => processingGeometryExtent(processingGeometry),
+    [processingGeometry],
+  );
+  const initialBbox = processingExtent ?? sheet.bbox;
 
   return (
     <div
@@ -81,19 +89,31 @@ export function DetectionMap() {
       style={{ right: panelInset }}
     >
       {mode === "single" ? (
-        <SingleMap sheetBbox={sheet.bbox} view={view} setView={setView} />
+        <SingleMap
+          initialBbox={initialBbox}
+          resultBoundary={processingGeometry}
+          view={view}
+          setView={setView}
+        />
       ) : mode === "split" ? (
-        <SplitMap sheetBbox={sheet.bbox} view={view} setView={setView} />
+        <SplitMap
+          initialBbox={initialBbox}
+          resultBoundary={processingGeometry}
+          view={view}
+          setView={setView}
+        />
       ) : mode === "swipe-x" ? (
         <SwipeMap
-          sheetBbox={sheet.bbox}
+          initialBbox={initialBbox}
+          resultBoundary={processingGeometry}
           axis="x"
           view={view}
           setView={setView}
         />
       ) : (
         <SwipeMap
-          sheetBbox={sheet.bbox}
+          initialBbox={initialBbox}
+          resultBoundary={processingGeometry}
           axis="y"
           view={view}
           setView={setView}
@@ -108,28 +128,30 @@ export function DetectionMap() {
 interface MapModeProps {
   view: ViewState | null;
   setView: (v: ViewState) => void;
+  resultBoundary: Polygon | MultiPolygon | null;
 }
 
 // ============================================================
 // 모드 1: single — 당해년도 기본 표시. 당해년도가 없으면 과년도, 둘 다 없으면 OSM.
 // ============================================================
 function SingleMap({
-  sheetBbox,
+  initialBbox,
+  resultBoundary,
   view,
   setView,
-}: { sheetBbox: [number, number, number, number] } & MapModeProps) {
+}: { initialBbox: [number, number, number, number] } & MapModeProps) {
   const initialBounds = useMemo(
-    () => bboxToLeafletBounds(sheetBbox),
-    [sheetBbox],
+    () => bboxToLeafletBounds(initialBbox),
+    [initialBbox],
   );
-  const stdDs = useSheetDetailStore((s) => s.standardDataset);
-  const cmpDs = useSheetDetailStore((s) => s.compareDataset);
-  const top = cmpDs?.tile_path ?? stdDs?.tile_path ?? null;
-  const label = cmpDs
-    ? `당해년도: ${cmpDs.display_name}`
-    : stdDs
-      ? `과년도: ${stdDs.display_name}`
-      : "과년도 / 당해년도 (mock)";
+  const stdDatasets = useSheetDetailStore((s) => s.standardDatasets);
+  const cmpDatasets = useSheetDetailStore((s) => s.compareDatasets);
+  const topDatasets = cmpDatasets.length > 0 ? cmpDatasets : stdDatasets;
+  const topSide = cmpDatasets.length > 0 ? "compare" : "standard";
+  const label = datasetGroupLabel(
+    topSide === "compare" ? "당해년도" : "과년도",
+    topDatasets,
+  );
 
   return (
     <MapContainer
@@ -143,8 +165,9 @@ function SingleMap({
     >
       <ZoomControl position="topright" />
       <BaseTile />
-      {top ? <TitilerLayer tilePath={top} /> : null}
-      <DatasetBboxLayer side={cmpDs ? "compare" : stdDs ? "standard" : undefined} />
+      <DatasetTileLayers datasets={topDatasets} />
+      <DatasetFootprintBoundaryLayer datasets={topDatasets} side={topSide} />
+      <ProcessingIntersectionBoundaryLayer geometry={resultBoundary} />
       <ResourceLabel position="bottom-left" text={label} />
       <DetectionsLayer />
       <DrawController />
@@ -255,21 +278,20 @@ function useSyncedWheelZoom() {
 // 모드 2: split (좌우 두 MapContainer + view 동기화)
 // ============================================================
 function SplitMap({
-  sheetBbox,
+  initialBbox,
+  resultBoundary,
   view,
   setView,
-}: { sheetBbox: [number, number, number, number] } & MapModeProps) {
+}: { initialBbox: [number, number, number, number] } & MapModeProps) {
   const initialBounds = useMemo(
-    () => bboxToLeafletBounds(sheetBbox),
-    [sheetBbox],
+    () => bboxToLeafletBounds(initialBbox),
+    [initialBbox],
   );
-  const stdDs = useSheetDetailStore((s) => s.standardDataset);
-  const cmpDs = useSheetDetailStore((s) => s.compareDataset);
+  const stdDatasets = useSheetDetailStore((s) => s.standardDatasets);
+  const cmpDatasets = useSheetDetailStore((s) => s.compareDatasets);
 
-  const stdLabel = stdDs ? `과년도: ${stdDs.display_name}` : "과년도 (mock)";
-  const cmpLabel = cmpDs
-    ? `당해년도: ${cmpDs.display_name}`
-    : "당해년도 (mock)";
+  const stdLabel = datasetGroupLabel("과년도", stdDatasets);
+  const cmpLabel = datasetGroupLabel("당해년도", cmpDatasets);
 
   // 양 map 의 wheel-zoom 동시 처리 + maps context 제공
   const { register, wrapperRef, maps } = useSyncedWheelZoom();
@@ -291,10 +313,12 @@ function SplitMap({
           >
             <MapRegister register={register} />
             <BaseTile />
-            {stdDs?.tile_path ? (
-              <TitilerLayer tilePath={stdDs.tile_path} />
-            ) : null}
-            <DatasetBboxLayer side="standard" />
+            <DatasetTileLayers datasets={stdDatasets} />
+            <DatasetFootprintBoundaryLayer
+              datasets={stdDatasets}
+              side="standard"
+            />
+            <ProcessingIntersectionBoundaryLayer geometry={resultBoundary} />
             <DetectionsLayer />
             <DrawController />
             <EditController />
@@ -321,10 +345,12 @@ function SplitMap({
             <MapRegister register={register} />
             <ZoomControl position="topright" />
             <BaseTile />
-            {cmpDs?.tile_path ? (
-              <TitilerLayer tilePath={cmpDs.tile_path} />
-            ) : null}
-            <DatasetBboxLayer side="compare" />
+            <DatasetTileLayers datasets={cmpDatasets} />
+            <DatasetFootprintBoundaryLayer
+              datasets={cmpDatasets}
+              side="compare"
+            />
+            <ProcessingIntersectionBoundaryLayer geometry={resultBoundary} />
             <DetectionsLayer />
             <DrawController />
             <EditController />
@@ -458,22 +484,23 @@ function ViewSync({
 // (Y axis 는 top/bottom 으로 동일 구조)
 // ============================================================
 function SwipeMap({
-  sheetBbox,
+  initialBbox,
+  resultBoundary,
   axis,
   view,
   setView,
 }: {
-  sheetBbox: [number, number, number, number];
+  initialBbox: [number, number, number, number];
   axis: "x" | "y";
 } & MapModeProps) {
   const initialBounds = useMemo(
-    () => bboxToLeafletBounds(sheetBbox),
-    [sheetBbox],
+    () => bboxToLeafletBounds(initialBbox),
+    [initialBbox],
   );
-  const stdDs = useSheetDetailStore((s) => s.standardDataset);
-  const cmpDs = useSheetDetailStore((s) => s.compareDataset);
-  const stdLabel = stdDs ? `과년도: ${stdDs.display_name}` : "과년도";
-  const cmpLabel = cmpDs ? `당해년도: ${cmpDs.display_name}` : "당해년도";
+  const stdDatasets = useSheetDetailStore((s) => s.standardDatasets);
+  const cmpDatasets = useSheetDetailStore((s) => s.compareDatasets);
+  const stdLabel = datasetGroupLabel("과년도", stdDatasets);
+  const cmpLabel = datasetGroupLabel("당해년도", cmpDatasets);
 
   // 셔터 위치 — React state 미사용. drag 중 매 mousemove 마다 re-render 하면
   // MapContainer props 가 변해 시각이 끊김. ref 로 직접 DOM mutation 만.
@@ -610,10 +637,12 @@ function SwipeMap({
           >
             <MapRegister register={register} />
             <BaseTile />
-            {stdDs?.tile_path ? (
-              <TitilerLayer tilePath={stdDs.tile_path} />
-            ) : null}
-            <DatasetBboxLayer side="standard" />
+            <DatasetTileLayers datasets={stdDatasets} />
+            <DatasetFootprintBoundaryLayer
+              datasets={stdDatasets}
+              side="standard"
+            />
+            <ProcessingIntersectionBoundaryLayer geometry={resultBoundary} />
             <DetectionsLayer />
             <DrawController />
             <EditController />
@@ -654,10 +683,12 @@ function SwipeMap({
             <MapRegister register={register} />
             <ZoomControl position="topright" />
             <BaseTile />
-            {cmpDs?.tile_path ? (
-              <TitilerLayer tilePath={cmpDs.tile_path} />
-            ) : null}
-            <DatasetBboxLayer side="compare" />
+            <DatasetTileLayers datasets={cmpDatasets} />
+            <DatasetFootprintBoundaryLayer
+              datasets={cmpDatasets}
+              side="compare"
+            />
+            <ProcessingIntersectionBoundaryLayer geometry={resultBoundary} />
             <DetectionsLayer />
             <DrawController />
             <EditController />
@@ -671,7 +702,7 @@ function SwipeMap({
 
         {/* 라벨 — X 스와이프는 각 영역 상단 중앙, Y 스와이프는 각 영상 우상단. */}
         <div
-          className="absolute pointer-events-none z-[400] text-sm font-bold px-3 py-1.5 rounded-md bg-white/95 border-2 border-red-500 shadow-sm text-slate-700 whitespace-nowrap"
+          className="absolute pointer-events-none z-[400] max-w-[45%] whitespace-normal break-words text-center text-sm leading-5 font-bold px-3 py-1.5 rounded-md bg-white/95 border-2 border-red-500 shadow-sm text-slate-700"
           style={
             axis === "x"
               ? { top: 12, left: "25%", transform: "translateX(-50%)" }
@@ -681,7 +712,7 @@ function SwipeMap({
           {stdLabel}
         </div>
         <div
-          className="absolute pointer-events-none z-[400] text-sm font-bold px-3 py-1.5 rounded-md bg-white/95 border-2 border-red-500 shadow-sm text-slate-700 whitespace-nowrap"
+          className="absolute pointer-events-none z-[400] max-w-[45%] whitespace-normal break-words text-center text-sm leading-5 font-bold px-3 py-1.5 rounded-md bg-white/95 border-2 border-red-500 shadow-sm text-slate-700"
           style={
             axis === "x"
               ? { top: 12, left: "75%", transform: "translateX(-50%)" }
@@ -732,58 +763,120 @@ function SwipeMap({
 // 공용 — 베이스 타일 + 라벨 + 폴리곤 + 마커 + draw
 // ============================================================
 
-/**
- * 과년도/당해년도 dataset bbox 폴리곤 — 추론이 돌기 전이나 타일 로딩 전에도 영상 범위를
- * 윤곽선으로 표시. 과년도=cyan 점선, 당해년도=red 점선.
- */
-type DatasetSide = "standard" | "compare";
+/** 과년도/당해년도 원본 정사영상 각각의 footprint 외곽선. */
+function DatasetFootprintBoundaryLayer({
+  datasets,
+  side,
+}: {
+  datasets: Dataset[];
+  side: "standard" | "compare";
+}) {
+  const featureCollection = useMemo<FeatureCollection<Polygon>>(
+    () => ({
+      type: "FeatureCollection",
+      features: datasets
+        .filter((dataset) => dataset.bbox.coordinates[0]?.length > 0)
+        .map((dataset) => ({
+          type: "Feature",
+          properties: {
+            datasetId: dataset.id,
+            displayName: dataset.display_name,
+            side,
+          },
+          geometry: dataset.bbox,
+        })),
+    }),
+    [datasets, side],
+  );
 
-function DatasetBboxLayer({ side }: { side?: DatasetSide }) {
-  const stdDs = useSheetDetailStore((s) => s.standardDataset);
-  const cmpDs = useSheetDetailStore((s) => s.compareDataset);
+  if (featureCollection.features.length === 0) return null;
+  const color = side === "standard" ? "#0066ff" : "#00c853";
+  const boundaryKey = `${side}-${datasets.map((dataset) => dataset.id).join("-")}`;
 
-  const fc = useMemo<FeatureCollection<Polygon> | null>(() => {
-    const features: Feature<Polygon>[] = [];
-    if ((!side || side === "standard") && stdDs?.bbox) {
-      features.push({
-        type: "Feature",
-        properties: { side: "standard", name: stdDs.display_name },
-        geometry: stdDs.bbox,
-      });
-    }
-    if ((!side || side === "compare") && cmpDs?.bbox) {
-      features.push({
-        type: "Feature",
-        properties: { side: "compare", name: cmpDs.display_name },
-        geometry: cmpDs.bbox,
-      });
-    }
-    if (features.length === 0) return null;
-    return { type: "FeatureCollection", features };
-  }, [side, stdDs?.bbox, cmpDs?.bbox, stdDs?.display_name, cmpDs?.display_name]);
-
-  if (!fc) return null;
   return (
     <GeoJSON
-      data={fc}
-      style={(feature) => {
-        const side = String(feature?.properties?.side ?? "");
-        const isStd = side === "standard";
-        return {
-          color: isStd ? "#22d3ee" : "#ef4444", // cyan-400 / red-500
-          weight: 3.5,
-          opacity: 1,
-          fill: false,
-          fillOpacity: 0,
-          dashArray: "8,4",
-          interactive: false,
-        } as PathOptions;
+      key={boundaryKey}
+      data={featureCollection}
+      style={{
+        color,
+        weight: 3.5,
+        opacity: 1,
+        fill: false,
+        fillOpacity: 0,
+        interactive: false,
       }}
-      // bbox 는 클릭 받지 않음 — 폴리곤 위에 있을 때 detection 클릭 가로채지 않도록.
       eventHandlers={{}}
       pane="overlayPane"
     />
   );
+}
+
+/** 과년도·당해년도 영상 묶음이 실제로 교차하는 처리영역 외곽선. */
+function ProcessingIntersectionBoundaryLayer({
+  geometry,
+}: {
+  geometry: Polygon | MultiPolygon | null;
+}) {
+  const feature = useMemo<Feature<Polygon | MultiPolygon> | null>(
+    () =>
+      geometry
+        ? {
+            type: "Feature",
+            properties: { kind: "detection-result-boundary" },
+            geometry,
+          }
+        : null,
+    [geometry],
+  );
+
+  if (!feature) return null;
+  const boundaryKey = JSON.stringify(feature.geometry.coordinates);
+  return (
+    <GeoJSON
+      key={boundaryKey}
+      data={feature}
+      style={{
+        color: "#f59e0b",
+        weight: 3,
+        opacity: 1,
+        fill: false,
+        fillOpacity: 0,
+        dashArray: "7,4",
+        interactive: false,
+      }}
+      // 결과 외곽선은 클릭을 받지 않아 detection 선택을 가로채지 않는다.
+      eventHandlers={{}}
+      pane="overlayPane"
+    />
+  );
+}
+
+function processingGeometryExtent(
+  geometry: Polygon | MultiPolygon | null,
+): [number, number, number, number] | null {
+  if (!geometry) return null;
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+
+  const polygons =
+    geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
+  for (const polygon of polygons) {
+    for (const ring of polygon) {
+      for (const position of ring) {
+        const [lng, lat] = position;
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+        minLng = Math.min(minLng, lng);
+        minLat = Math.min(minLat, lat);
+        maxLng = Math.max(maxLng, lng);
+        maxLat = Math.max(maxLat, lat);
+      }
+    }
+  }
+
+  if (![minLng, minLat, maxLng, maxLat].every(Number.isFinite)) return null;
+  return [minLng, minLat, maxLng, maxLat];
 }
 
 function BaseTile() {
@@ -802,6 +895,27 @@ function BaseTile() {
       updateWhenIdle={true}
     />
   );
+}
+
+function DatasetTileLayers({ datasets }: { datasets: Dataset[] }) {
+  return (
+    <>
+      {datasets.map((dataset, index) =>
+        dataset.tile_path ? (
+          <TitilerLayer
+            key={dataset.id}
+            tilePath={dataset.tile_path}
+            zIndex={50 + index}
+          />
+        ) : null,
+      )}
+    </>
+  );
+}
+
+function datasetGroupLabel(label: string, datasets: Dataset[]): string {
+  if (datasets.length === 0) return label;
+  return `${label}: ${datasets.map((dataset) => dataset.display_name).join(" · ")}`;
 }
 
 /**
@@ -849,7 +963,7 @@ function TitilerLayer({
 /** 패널 wrapper 의 상단 중앙에 표시되는 라벨 (split 모드용). */
 function PanelLabel({ text }: { text: string }) {
   return (
-    <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[450] pointer-events-none text-sm font-bold px-3 py-1.5 rounded-md bg-white/95 border-2 border-red-500 shadow-sm text-slate-700 whitespace-nowrap">
+    <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[450] pointer-events-none w-max max-w-[90%] whitespace-normal break-words text-center text-sm leading-5 font-bold px-3 py-1.5 rounded-md bg-white/95 border-2 border-red-500 shadow-sm text-slate-700">
       {text}
     </div>
   );
@@ -883,7 +997,7 @@ function ResourceLabel({
       const div = L.DomUtil.create("div");
       div.className = "leaflet-bar";
       div.style.cssText =
-        "background:rgba(255,255,255,0.92);border:1px solid #e2e8f0;padding:4px 8px;font-size:11px;font-weight:700;color:#475569;border-radius:6px;";
+        "background:rgba(255,255,255,0.92);border:1px solid #e2e8f0;padding:4px 8px;max-width:420px;white-space:normal;overflow-wrap:anywhere;line-height:1.35;font-size:11px;font-weight:700;color:#475569;border-radius:6px;";
       div.textContent = text;
       return div;
     };

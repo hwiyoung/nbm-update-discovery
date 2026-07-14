@@ -709,6 +709,29 @@ export async function getTaskStatus(taskId: string): Promise<Task> {
   return fetchJson<Task>(`${API_BASE_URL}/tasks/${taskId}/status`);
 }
 
+/**
+ * Task의 활성 변화탐지 결과를 백엔드가 Fiona/GDAL로 생성한 UTF-8 SHP ZIP으로 받는다.
+ * 브라우저에서 DBF를 만들지 않아 한글 속성의 실제 UTF-8 바이트를 보장한다.
+ */
+export async function downloadTaskShapefile(taskId: string): Promise<Blob> {
+  if (useMock) {
+    throw new Error("Mock 모드에서는 SHP 내보내기를 지원하지 않습니다");
+  }
+  const res = await fetch(
+    `${API_BASE_URL}/tasks/${encodeURIComponent(taskId)}/export/shp`,
+    { headers: { Accept: "application/zip" } },
+  );
+  if (!res.ok) {
+    let message = `SHP 내보내기 실패: HTTP ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) message = body.detail;
+    } catch {/* JSON이 아닌 오류 응답은 기본 메시지 사용 */}
+    throw new Error(message);
+  }
+  return res.blob();
+}
+
 export async function createTask(payload: TaskCreatePayload): Promise<Task> {
   if (useMock) {
     const task: Task = {
@@ -757,6 +780,8 @@ export interface TaskUpdatePayload {
   description?: string;
   standard_resource_id?: number | null;
   compare_resource_id?: number | null;
+  standard_resource_ids?: number[];
+  compare_resource_ids?: number[];
   models?: ObjectCategory[];
 }
 

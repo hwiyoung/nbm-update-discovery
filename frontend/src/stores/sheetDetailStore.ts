@@ -47,6 +47,9 @@ interface SheetDetailState {
   /** 프로젝트(=task) 단위 진입 시 연결된 영상 (과년도/당해년도). 도엽 단위 진입에선 둘 다 null. */
   standardDataset: Dataset | null;
   compareDataset: Dataset | null;
+  /** 다중 입력 작업의 전체 영상 목록. 단일 필드는 기존 컴포넌트 호환용 첫 항목이다. */
+  standardDatasets: Dataset[];
+  compareDatasets: Dataset[];
   /** 프로젝트 단위 진입 시 현재 task. sheet 단위 진입에선 null. 검수/시작/중단 버튼이 본 값을 구독. */
   task: Task | null;
 
@@ -165,6 +168,8 @@ const initialState: SheetDetailState & {
   history: [],
   standardDataset: null,
   compareDataset: null,
+  standardDatasets: [],
+  compareDatasets: [],
   task: null,
   filter: { ...initialFilter },
   viewerMode: "split",
@@ -223,7 +228,9 @@ export const useSheetDetailStore = create<Store>((set, get) => ({
           task.sheet_codes.map((c) => getSheet(c).catch(() => null)),
         );
         const validSheets = sheets.filter((s): s is MapSheet => s !== null);
-
+        if (validSheets.length === 0) {
+          throw new Error("프로젝트 처리 도엽 정보를 불러오지 못했습니다");
+        }
         // bbox union (4326): minLng, minLat, maxLng, maxLat
         let minLng = Infinity, minLat = Infinity;
         let maxLng = -Infinity, maxLat = -Infinity;
@@ -243,7 +250,7 @@ export const useSheetDetailStore = create<Store>((set, get) => ({
           name: task.name,
           region: validSheets[0]?.region ?? "기타",
           bbox: [minLng, minLat, maxLng, maxLat],
-          // synthetic geometry — bbox 기반 polygon (실제 도엽 경계 union 은 표시 안 함)
+          // synthetic geometry는 도엽 메타 호환 및 결과가 없을 때의 초기 뷰용이다.
           geometry: {
             type: "Polygon",
             coordinates: [[
@@ -276,47 +283,22 @@ export const useSheetDetailStore = create<Store>((set, get) => ({
         throw new Error("프로젝트에 매칭된 도엽이 없습니다");
       }
 
-      // 3) 과년도/당해년도 dataset fetch (있을 때만, 실패해도 무시)
-      const [stdDs, cmpDs] = await Promise.all([
-        task.standard_resource_id != null
-          ? getDataset(task.standard_resource_id).catch(() => null)
-          : Promise.resolve(null),
-        task.compare_resource_id != null
-          ? getDataset(task.compare_resource_id).catch(() => null)
-          : Promise.resolve(null),
+      // 3) 과년도/당해년도 전체 dataset fetch. 새 배열 필드를 우선 사용하고,
+      // 배열이 없는 기존 작업만 호환용 단일 ID로 대체한다.
+      const standardIds = normalizeTaskResourceIds(
+        task.standard_resource_ids,
+        task.standard_resource_id,
+      );
+      const compareIds = normalizeTaskResourceIds(
+        task.compare_resource_ids,
+        task.compare_resource_id,
+      );
+      const [stdDatasets, cmpDatasets] = await Promise.all([
+        loadDatasetsByIds(standardIds),
+        loadDatasetsByIds(compareIds),
       ]);
-
-      // 초기 뷰 bbox: dataset bbox 가 있으면 그것을 우선 사용 (sheet union 보다
-      // 영상 자체 영역으로 fit). 두 datasets 가 있으면 둘의 union.
-      const dsBboxes: [number, number, number, number][] = [];
-      for (const ds of [stdDs, cmpDs]) {
-        if (!ds?.bbox) continue;
-        const ring = ds.bbox.coordinates[0];
-        if (!ring || ring.length === 0) continue;
-        let lo_x = Infinity, lo_y = Infinity, hi_x = -Infinity, hi_y = -Infinity;
-        for (const [x, y] of ring) {
-          if (x < lo_x) lo_x = x;
-          if (y < lo_y) lo_y = y;
-          if (x > hi_x) hi_x = x;
-          if (y > hi_y) hi_y = y;
-        }
-        if (Number.isFinite(lo_x)) {
-          dsBboxes.push([lo_x, lo_y, hi_x, hi_y]);
-        }
-      }
-      if (dsBboxes.length > 0) {
-        let lo_x = Infinity, lo_y = Infinity, hi_x = -Infinity, hi_y = -Infinity;
-        for (const [x0, y0, x1, y1] of dsBboxes) {
-          if (x0 < lo_x) lo_x = x0;
-          if (y0 < lo_y) lo_y = y0;
-          if (x1 > hi_x) hi_x = x1;
-          if (y1 > hi_y) hi_y = y1;
-        }
-        mergedSheet = {
-          ...mergedSheet,
-          bbox: [lo_x, lo_y, hi_x, hi_y],
-        };
-      }
+      const stdDs = stdDatasets[0] ?? null;
+      const cmpDs = cmpDatasets[0] ?? null;
 
       set({
         sheet: mergedSheet,
@@ -324,6 +306,8 @@ export const useSheetDetailStore = create<Store>((set, get) => ({
         history,
         standardDataset: stdDs,
         compareDataset: cmpDs,
+        standardDatasets: stdDatasets,
+        compareDatasets: cmpDatasets,
         task,
         loading: false,
       });
@@ -559,6 +543,25 @@ export const useSheetDetailStore = create<Store>((set, get) => ({
     }));
   },
 }));
+
+function normalizeTaskResourceIds(
+  ids: number[] | null | undefined,
+  fallback: number | null,
+): number[] {
+  const normalized: number[] = [];
+  for (const id of [...(ids ?? []), fallback]) {
+    if (id == null || normalized.includes(id)) continue;
+    normalized.push(id);
+  }
+  return normalized;
+}
+
+async function loadDatasetsByIds(ids: number[]): Promise<Dataset[]> {
+  const loaded = await Promise.all(
+    ids.map((id) => getDataset(id).catch(() => null)),
+  );
+  return loaded.filter((dataset): dataset is Dataset => dataset !== null);
+}
 
 /**
  * write action 시 store.history 에 entry 들을 push (client-side memory undo).

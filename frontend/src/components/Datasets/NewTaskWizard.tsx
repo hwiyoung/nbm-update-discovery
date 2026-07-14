@@ -40,6 +40,7 @@ export function NewTaskWizard() {
   const setHovered = useDatasetsStore((state) => state.setWizardHoveredOrtho);
   const togglePast = useDatasetsStore((state) => state.toggleWizardPast);
   const toggleCurrent = useDatasetsStore((state) => state.toggleWizardCurrent);
+  const clearSelections = useDatasetsStore((state) => state.clearWizardSelections);
   const datasets = useDatasetsStore((state) => state.datasets);
   const datasetsLoading = useDatasetsStore((state) => state.loading);
   const loadDatasets = useDatasetsStore((state) => state.loadDatasets);
@@ -258,6 +259,7 @@ export function NewTaskWizard() {
                 onHover={setHovered}
                 onTogglePast={togglePast}
                 onToggleCurrent={toggleCurrent}
+                onClearSelection={clearSelections}
               />
             ) : null}
             {step === "meta" ? (

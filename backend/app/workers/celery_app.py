@@ -22,4 +22,13 @@ celery_app.conf.update(
     timezone="Asia/Seoul",
     enable_utc=True,
     task_track_started=True,
+    # Redis broker/backend 를 함께 쓸 때 세 설정을 동일하게 맞춰야 한다.
+    # 본 값은 이 NBM Compose stack 의 Redis 연결에만 적용된다.
+    broker_transport_options={
+        "visibility_timeout": _settings.change_detection_visibility_timeout_s,
+    },
+    result_backend_transport_options={
+        "visibility_timeout": _settings.change_detection_visibility_timeout_s,
+    },
+    visibility_timeout=_settings.change_detection_visibility_timeout_s,
 )

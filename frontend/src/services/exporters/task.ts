@@ -1,17 +1,21 @@
 /**
  * Task(=프로젝트) 단위 내보내기 — 매칭된 모든 sheet 의 detections 를 한 파일로.
  *
- * SHP/DXF/PDF 모두 listTaskDetections() 한 번 호출 → core 로직 재사용.
+ * SHP는 백엔드 Fiona/GDAL 생성 ZIP을 사용하고, DXF/PDF는 detection API를 재사용한다.
  */
 
-import { getTaskStatus, listTaskDetections } from "@/api/client";
+import {
+  downloadTaskShapefile,
+  getTaskStatus,
+  listTaskDetections,
+} from "@/api/client";
 import type { DetectionObject, Task } from "@/types";
 import {
   CHANGE_TYPE_BY_CODE,
   OBJECT_CATEGORY_LABEL,
   VISIBLE_CHANGE_TYPES,
 } from "@/utils/constants";
-import { convertPolygon4326to5186, PRJ_5186 } from "./proj";
+import { convertPolygon4326to5186 } from "./proj";
 import { getTaskFilenameStem, saveExportBlob } from "./saveTarget";
 import type { ExportSaveTarget } from "./saveTarget";
 
@@ -26,93 +30,22 @@ async function fetchTaskAndDetections(
 }
 
 // ============================================================
-// SHP — shp-write
+// SHP — backend Fiona/GDAL
 //
-// shp-write 0.3.2 의 기본 download() 는 `location.href = 'data:...'` 로
-// SPA 를 navigate 시켜 다운로드가 실패한다. 또한 zip 내부 PRJ 가 WGS84 로
-// 하드코딩돼 좌표(EPSG:5186)와 불일치한다. 본 함수는 직접 zip 을 만들고
-// PRJ 를 5186 으로 덮어써서 Blob 으로 트리거한다.
-//
-// 백엔드 결과물이 SHP 인 경우는 그대로 받아오고, 아닌 경우(GeoJSON 등) 본 함수가
-// detections 를 클라이언트 측에서 SHP 로 변환한다 — "프로젝트 결과물에 SHP 가
-// 없으면 변환해서 내보내기".
+// 브라우저 shp-write의 DBF writer는 한글 문자를 1 byte로 잘라 손상시킨다.
+// 백엔드가 DB의 EPSG:5186 geometry와 속성을 UTF-8 DBF로 직접 직렬화하고,
+// 프론트는 완성된 ZIP Blob만 기존 저장 대상(File System Access API/다운로드)에 쓴다.
 // ============================================================
 export async function exportTaskAsShp(
   taskId: string,
   saveTarget?: ExportSaveTarget,
 ): Promise<void> {
-  const { task, detections } = await fetchTaskAndDetections(taskId);
-
-  if (detections.length === 0) {
-    throw new Error("내보낼 변화탐지 객체가 없습니다");
-  }
-
-  const features = detections.map((d, index) => {
-    const coords5186 = convertPolygon4326to5186(d.geometry.coordinates);
-    return {
-      type: "Feature" as const,
-      properties: {
-        NO: index + 1,
-        MAP_IDX: d.sheet_code,
-        CLASS: OBJECT_CATEGORY_LABEL[d.model],
-        TYPE: d.change_type,
-        TYPE_KO: CHANGE_TYPE_BY_CODE[d.change_type].label,
-        CONF: d.confidence,
-        AREA_M2: d.area_m2,
-        REGION: d.region_code,
-        ADDR: d.address,
-        MEMO: d.reviewer_memo,
-        OBJ_ID: d.id,
-      },
-      geometry: {
-        type: "Polygon" as const,
-        coordinates: coords5186,
-      },
-    };
-  });
-
-  const fc = {
-    type: "FeatureCollection" as const,
-    features,
-  };
-
-  const stem = getTaskFilenameStem(task);
-  const folder = `nbm_${stem}`;
-  const layerName = `nbm_${stem}_detections`;
-
-  // shp-write 의 zip() 으로 base64 zip 생성 (zip 안에 .shp/.shx/.dbf/.prj 포함).
-  // download() 을 쓰지 않는 이유: 'data:' URI 가 SPA 를 navigate 시킨다.
-  const shpwrite = (await import("shp-write")).default;
-
-  let base64Zip: string;
-  try {
-    base64Zip = shpwrite.zip(fc as never, {
-      folder,
-      types: { polygon: layerName },
-    });
-  } catch (err) {
-    throw new Error(
-      `SHP 변환 실패 — detections=${detections.length} : ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  // shp-write 의 transitive dep 인 JSZip 2.5.0 (sync API) 으로 zip 을 열어
-  // .prj 파일을 EPSG:5186 PRJ 로 교체한다 — generate.type='blob' 으로 트리거.
-  const JSZip = (await import("jszip")).default;
-  const archive = new JSZip();
-  archive.load(base64Zip, { base64: true });
-
-  for (const relPath of Object.keys(archive.files)) {
-    if (relPath.toLowerCase().endsWith(".prj")) {
-      archive.file(relPath, PRJ_5186);
-    }
-    if (relPath.toLowerCase().endsWith(".dbf")) {
-      archive.file(relPath.replace(/\.dbf$/i, ".cpg"), "UTF-8");
-    }
-  }
-
-  const blob = archive.generate({ type: "blob" }) as Blob;
-  await saveExportBlob(blob, `${folder}.zip`, "shp", saveTarget);
+  const [task, blob] = await Promise.all([
+    getTaskStatus(taskId),
+    downloadTaskShapefile(taskId),
+  ]);
+  const filename = `${getTaskFilenameStem(task)}.zip`;
+  await saveExportBlob(blob, filename, "shp", saveTarget);
 }
 
 // ============================================================
@@ -240,7 +173,7 @@ export async function exportTaskAsDxf(
   const stem = getTaskFilenameStem(task);
   await saveExportBlob(
     new Blob([drawing.toDxfString()], { type: "application/dxf" }),
-    `nbm_${stem}.dxf`,
+    `${stem}_2d.dxf`,
     "dxf",
     saveTarget,
   );
@@ -291,7 +224,7 @@ export async function exportTaskAsPdf(
 
     await saveExportBlob(
       doc.output("blob"),
-      `nbm_${getTaskFilenameStem(task)}_report.pdf`,
+      `${getTaskFilenameStem(task)}_report.pdf`,
       "pdf",
       saveTarget,
     );

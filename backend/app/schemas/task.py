@@ -37,6 +37,8 @@ class Task(BaseModel):
     progress_message: str | None = None
     progress_stage: str | None = None
     progress_detail: dict[str, Any] | None = None
+    processing_geometry: dict[str, Any] | None = None
+    processing_area_m2: float | None = None
     progress_updated_at: datetime | None = None
     created_at: datetime
     started_at: datetime | None = None

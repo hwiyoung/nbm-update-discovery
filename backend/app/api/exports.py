@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
+import re
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -31,6 +33,7 @@ from app.schemas.export import (
 from app.services.dem_z_registry import get_dem_z_service, get_init_error
 # detection_gpkg 는 함수 안에서 geopandas 를 import 하므로 모듈 상단 import 안전.
 from app.services.detection_gpkg import cleanup_gpkg, write_task_detections_gpkg
+from app.services.task_shapefile_export import create_task_shapefile_zip
 from app.services.task_artifacts import task_artifact_dir
 
 # dem_z_export 모듈은 top-level 에서 geopandas / osgeo 를 import 하므로
@@ -38,6 +41,48 @@ from app.services.task_artifacts import task_artifact_dir
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tasks", tags=["exports"])
+
+
+# ============================================================
+# GET — 2D Shapefile ZIP export (UTF-8 DBF, EPSG:5186)
+# ============================================================
+
+
+@router.get("/{task_id}/export/shp")
+def export_task_shapefile(
+    task_id: str,
+    db: Session = Depends(get_db),
+) -> Response:
+    """Task의 활성 변화탐지 결과를 UTF-8 Shapefile ZIP으로 반환한다."""
+    task = db.get(TaskORM, task_id)
+    if task is None:
+        raise HTTPException(404, f"Task not found: {task_id}")
+
+    safe_task_id = re.sub(r"[^A-Za-z0-9_-]", "_", task_id)[:64] or "task"
+    layer_name = f"nbm_{safe_task_id}_detections"
+    content, count = create_task_shapefile_zip(db, task_id, layer_name)
+    if count == 0:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "no_detections",
+                "detail": "내보낼 변화탐지 객체가 없습니다",
+            },
+        )
+
+    created_at = task.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    created_at_kst = created_at.astimezone(ZoneInfo("Asia/Seoul"))
+    filename = f"{created_at_kst.strftime('%Y%m%d_%H%M%S')}.zip"
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Feature-Count": str(count),
+        },
+    )
 
 
 # ============================================================

@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -415,6 +415,8 @@ def delete_dataset(dataset_id: int, db: Session = Depends(get_db)) -> dict[str, 
                 or_(
                     TaskORM.standard_resource_id == dataset_id,
                     TaskORM.compare_resource_id == dataset_id,
+                    func.array_position(TaskORM.standard_resource_ids, dataset_id).is_not(None),
+                    func.array_position(TaskORM.compare_resource_ids, dataset_id).is_not(None),
                 )
             )
         )

@@ -57,11 +57,25 @@ export function EditTaskModal({ task, open, onClose }: EditTaskModalProps) {
     }
     setSubmitting(true);
     try {
+      const standardIds =
+        standardId === task.standard_resource_id
+          ? task.standard_resource_ids
+          : standardId != null
+            ? [standardId]
+            : [];
+      const compareIds =
+        compareId === task.compare_resource_id
+          ? task.compare_resource_ids
+          : compareId != null
+            ? [compareId]
+            : [];
       await patchTask(task.id, {
         name: name.trim(),
         description: description.trim(),
         standard_resource_id: standardId,
         compare_resource_id: compareId,
+        standard_resource_ids: standardIds,
+        compare_resource_ids: compareIds,
       });
       toast.success("프로젝트 수정 완료");
       onClose();

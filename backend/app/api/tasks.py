@@ -23,6 +23,7 @@ from app.models.task import TaskORM
 from app.schemas import Task, TaskCreatePayload, TaskUpdatePayload
 from app.services.serializers import task_to_schema
 from app.services.task_artifacts import delete_task_artifacts
+from app.services.task_processing_geometry import task_processing_footprint
 from app.services.task_progress import write_task_progress
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -68,6 +69,29 @@ def _normalize_resource_ids(
     return normalized
 
 
+def _validate_disjoint_resource_ids(
+    standard_ids: list[int],
+    compare_ids: list[int],
+) -> None:
+    duplicated_ids = sorted(set(standard_ids) & set(compare_ids))
+    if not duplicated_ids:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "error": {
+                "code": "BUSINESS_RULE_VIOLATION",
+                "message": "같은 데이터셋을 과년도와 당해년도에 동시에 선택할 수 없습니다",
+                "details": {
+                    "duplicated_resource_ids": duplicated_ids,
+                    "standard_resource_ids": standard_ids,
+                    "compare_resource_ids": compare_ids,
+                },
+            }
+        },
+    )
+
+
 def _load_datasets_or_404(
     db: Session,
     ids: list[int],
@@ -100,6 +124,19 @@ def _union_sheet_codes(datasets: list[DatasetORM]) -> set[str]:
 
 def _new_celery_task_id() -> str:
     return str(uuid4())
+
+
+def _prepare_task_run(row: TaskORM, celery_task_id: str) -> None:
+    """신규 수동 실행 세대를 준비한다.
+
+    완료 작업도 사용자가 재처리를 요청하면 새 Celery ID로 pending 상태가 된다.
+    이후 과거 delivery는 ID 불일치로 거부되고 이 실행 세대만 worker에 진입한다.
+    """
+    row.status = "pending"
+    row.progress = 0
+    row.started_at = None
+    row.finished_at = None
+    row.celery_task_id = celery_task_id
 
 
 @router.get("", response_model=list[Task])
@@ -136,7 +173,13 @@ def get_task(task_id: str, db: Session = Depends(get_db)) -> Task:
                 }
             },
         )
-    return task_to_schema(row, _task_detection_count(db, task_id))
+    footprint = task_processing_footprint(db, row)
+    return task_to_schema(
+        row,
+        _task_detection_count(db, task_id),
+        processing_geometry=(footprint.geometry_4326 if footprint else None),
+        processing_area_m2=(footprint.area_m2 if footprint else None),
+    )
 
 
 @router.post("", response_model=Task, status_code=202)
@@ -167,6 +210,7 @@ def create_task(payload: TaskCreatePayload, db: Session = Depends(get_db)) -> Ta
                 }
             },
         )
+    _validate_disjoint_resource_ids(standard_ids, compare_ids)
 
     standards = _load_datasets_or_404(db, standard_ids, field="standard_resource_ids")
     compares = _load_datasets_or_404(db, compare_ids, field="compare_resource_ids")
@@ -255,7 +299,7 @@ def get_task_status(task_id: str, db: Session = Depends(get_db)) -> Task:
 
 @router.post("/{task_id}/start", response_model=Task)
 def start_task(task_id: str, db: Session = Depends(get_db)) -> Task:
-    """처리 시작 — pending/canceled/failed 상태에서 Celery 작업 재큐.
+    """처리 시작 — 미실행/완료/중단/실패 작업을 새 Celery ID로 재큐.
 
     이미 running 인 경우 409.
     """
@@ -283,12 +327,9 @@ def start_task(task_id: str, db: Session = Depends(get_db)) -> Task:
             },
         )
 
-    # 재시도면 이전 finished_at / celery_task_id / progress 초기화.
-    row.status = "pending"
-    row.progress = 0
-    row.started_at = None
-    row.finished_at = None
-    row.celery_task_id = None
+    # 상태 초기화와 새 delivery ID 저장을 한 transaction 으로 묶는다.
+    celery_task_id = _new_celery_task_id()
+    _prepare_task_run(row, celery_task_id)
     db.commit()
     settings = get_settings()
     write_task_progress(
@@ -303,16 +344,16 @@ def start_task(task_id: str, db: Session = Depends(get_db)) -> Task:
     try:
         from app.workers.tasks import run_change_detection
 
-        celery_task_id = _new_celery_task_id()
-        row.celery_task_id = celery_task_id
-        db.commit()
         async_result = run_change_detection.apply_async(
             args=[task_id],
             queue=settings.change_detection_queue,
             task_id=celery_task_id,
         )
-        row.celery_task_id = async_result.id or celery_task_id
-        db.commit()
+        if async_result.id and async_result.id != celery_task_id:
+            raise RuntimeError(
+                "Celery returned an unexpected task id: "
+                f"expected={celery_task_id} actual={async_result.id}"
+            )
     except Exception as e:  # noqa: BLE001
         row.celery_task_id = None
         db.commit()
@@ -512,6 +553,14 @@ def update_task(
     if "compare_resource_ids" in data and data["compare_resource_ids"] is not None:
         row.compare_resource_ids = list(data["compare_resource_ids"])
         row.compare_resource_id = row.compare_resource_ids[0] if row.compare_resource_ids else None
+    try:
+        _validate_disjoint_resource_ids(
+            list(row.standard_resource_ids or []),
+            list(row.compare_resource_ids or []),
+        )
+    except HTTPException:
+        db.rollback()
+        raise
     db.commit()
     db.refresh(row)
     return task_to_schema(row, _task_detection_count(db, row.id))

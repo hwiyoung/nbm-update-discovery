@@ -17,8 +17,8 @@ import type {
 export function AnalysisDataAccordion() {
   const sheet = useSheetDetailStore((s) => s.sheet);
   const task = useSheetDetailStore((s) => s.task);
-  const standardDataset = useSheetDetailStore((s) => s.standardDataset);
-  const compareDataset = useSheetDetailStore((s) => s.compareDataset);
+  const standardDatasets = useSheetDetailStore((s) => s.standardDatasets);
+  const compareDatasets = useSheetDetailStore((s) => s.compareDatasets);
   const progressAnalysis = useMemo(
     () => parsePreflightResult(task?.progress_detail?.analysis),
     [task?.progress_detail],
@@ -29,15 +29,20 @@ export function AnalysisDataAccordion() {
 
   useEffect(() => {
     if (
-      task?.standard_resource_id == null ||
-      task.compare_resource_id == null
+      standardDatasets.length !== 1 ||
+      compareDatasets.length !== 1
     ) {
+      setMetadata(null);
+      setMetadataError(null);
+      setMetadataLoading(false);
       return;
     }
+    const standardId = standardDatasets[0]!.id;
+    const compareId = compareDatasets[0]!.id;
     let cancelled = false;
     setMetadataLoading(true);
     setMetadataError(null);
-    getDatasetPreflightMetadata(task.standard_resource_id, task.compare_resource_id)
+    getDatasetPreflightMetadata(standardId, compareId)
       .then((result) => {
         if (!cancelled) setMetadata(result);
       })
@@ -52,7 +57,7 @@ export function AnalysisDataAccordion() {
     return () => {
       cancelled = true;
     };
-  }, [task?.standard_resource_id, task?.compare_resource_id]);
+  }, [standardDatasets, compareDatasets]);
 
   if (!sheet) return null;
 
@@ -64,15 +69,15 @@ export function AnalysisDataAccordion() {
   return (
     <Accordion id="analysis" title="분석 데이터">
       <div className="space-y-2">
-        <ResourceRow
+        <ResourceGroup
           label="과년도"
-          dataset={standardDataset}
+          datasets={standardDatasets}
           fallbackDatasetId={sheet.standard_resource_id}
           raster={analysis?.standard ?? null}
         />
-        <ResourceRow
+        <ResourceGroup
           label="당해년도"
-          dataset={compareDataset}
+          datasets={compareDatasets}
           fallbackDatasetId={sheet.compare_resource_id}
           raster={analysis?.compare ?? null}
         />
@@ -85,6 +90,46 @@ export function AnalysisDataAccordion() {
         <p className="mt-3 text-[11px] text-red-600">{metadataError}</p>
       ) : null}
     </Accordion>
+  );
+}
+
+function ResourceGroup({
+  label,
+  datasets,
+  fallbackDatasetId,
+  raster,
+}: {
+  label: string;
+  datasets: Dataset[];
+  fallbackDatasetId: number | null;
+  raster: DatasetPreflightRaster | null;
+}) {
+  if (datasets.length === 0) {
+    return (
+      <ResourceRow
+        label={label}
+        dataset={null}
+        fallbackDatasetId={fallbackDatasetId}
+        raster={raster}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {datasets.map((dataset, index) => (
+        <ResourceRow
+          key={dataset.id}
+          label={datasets.length > 1 ? `${label} ${index + 1}` : label}
+          dataset={dataset}
+          fallbackDatasetId={dataset.id}
+          raster={datasets.length === 1 ? raster : null}
+        />
+      ))}
+      {datasets.length > 1 && raster ? (
+        <CompositeRasterRow label={`${label} 통합 (${datasets.length}장)`} raster={raster} />
+      ) : null}
+    </div>
   );
 }
 
@@ -116,15 +161,44 @@ function ResourceRow({
         </span>
       </div>
       <div className="text-[11px] text-slate-500">{taken}</div>
-      {raster ? (
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-500">
-          <MetaItem label="해상도" value={formatGsd(raster.mean_gsd_m)} />
-          <MetaItem label="크기" value={`${raster.width.toLocaleString("ko-KR")} x ${raster.height.toLocaleString("ko-KR")}`} />
-          <MetaItem label="좌표계" value={raster.crs} wide />
-          <MetaItem label="밴드" value={`${raster.band_count}개`} />
-          <MetaItem label="면적" value={formatArea(raster.footprint_area_m2)} />
-        </div>
-      ) : null}
+      {raster ? <RasterMetaGrid raster={raster} /> : null}
+    </div>
+  );
+}
+
+function CompositeRasterRow({
+  label,
+  raster,
+}: {
+  label: string;
+  raster: DatasetPreflightRaster;
+}) {
+  return (
+    <div className="rounded-md border border-blue-100 bg-blue-50/60 px-3 py-2">
+      <div className="flex items-center gap-1.5 text-xs font-bold text-blue-700">
+        <LayersIcon />
+        <span>{label}</span>
+      </div>
+      <RasterMetaGrid raster={raster} />
+    </div>
+  );
+}
+
+function LayersIcon() {
+  return <Image size={14} className="text-blue-500" />;
+}
+
+function RasterMetaGrid({ raster }: { raster: DatasetPreflightRaster }) {
+  return (
+    <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-500">
+      <MetaItem label="해상도" value={formatGsd(raster.mean_gsd_m)} />
+      <MetaItem
+        label="크기"
+        value={`${raster.width.toLocaleString("ko-KR")} x ${raster.height.toLocaleString("ko-KR")}`}
+      />
+      <MetaItem label="좌표계" value={raster.crs} wide />
+      <MetaItem label="밴드" value={`${raster.band_count}개`} />
+      <MetaItem label="면적" value={formatArea(raster.footprint_area_m2)} />
     </div>
   );
 }

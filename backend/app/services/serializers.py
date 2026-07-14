@@ -192,7 +192,13 @@ def history_to_schema(row: ReviewHistoryORM) -> ReviewHistory:
     )
 
 
-def task_to_schema(row: TaskORM, detection_count: int = 0) -> Task:
+def task_to_schema(
+    row: TaskORM,
+    detection_count: int = 0,
+    *,
+    processing_geometry: dict | None = None,
+    processing_area_m2: float | None = None,
+) -> Task:
     standard_ids = list(row.standard_resource_ids or [])
     compare_ids = list(row.compare_resource_ids or [])
     if not standard_ids and row.standard_resource_id is not None:
@@ -228,6 +234,8 @@ def task_to_schema(row: TaskORM, detection_count: int = 0) -> Task:
             if progress_meta and isinstance(progress_meta.get("detail"), dict)
             else None
         ),
+        processing_geometry=processing_geometry,
+        processing_area_m2=processing_area_m2,
         progress_updated_at=_progress_updated_at(progress_meta),
         created_at=row.created_at,
         started_at=getattr(row, "started_at", None),

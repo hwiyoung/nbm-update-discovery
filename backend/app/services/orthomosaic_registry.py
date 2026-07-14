@@ -20,7 +20,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -34,6 +34,8 @@ IMAGE_EXTENSIONS = {".tif", ".tiff"}
 
 # 파일명 끝부분 패턴: ..._{YYYYMMDD}_{HHMMSS}.tif
 _FILENAME_TIMESTAMP_RE = re.compile(r"(\d{8})_(\d{6})\.tiff?$", re.IGNORECASE)
+# 간단한 연도 접두사 패턴: 2024_Asan_clip.tif, 2025-foo.tif
+_FILENAME_YEAR_PREFIX_RE = re.compile(r"^((?:19|20)\d{2})(?:[_-]|$)")
 
 
 def _absolute_preserve_symlink(path: Path) -> str:
@@ -60,6 +62,8 @@ def _is_task_referenced(row: DatasetORM, db: Session) -> bool:
             or_(
                 TaskORM.standard_resource_id == row.id,
                 TaskORM.compare_resource_id == row.id,
+                func.array_position(TaskORM.standard_resource_ids, row.id).is_not(None),
+                func.array_position(TaskORM.compare_resource_ids, row.id).is_not(None),
             )
         ).limit(1)
     ).first()
@@ -116,6 +120,9 @@ def _parse_taken_at(path: Path) -> datetime:
             )
         except ValueError:
             pass
+    year_match = _FILENAME_YEAR_PREFIX_RE.search(path.name)
+    if year_match:
+        return datetime(int(year_match.group(1)), 1, 1, tzinfo=timezone.utc)
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
 
 
@@ -143,6 +150,8 @@ def _cleanup_missing(root: Path, db: Session) -> tuple[int, int]:
                 or_(
                     TaskORM.standard_resource_id == row.id,
                     TaskORM.compare_resource_id == row.id,
+                    func.array_position(TaskORM.standard_resource_ids, row.id).is_not(None),
+                    func.array_position(TaskORM.compare_resource_ids, row.id).is_not(None),
                 )
             ).limit(1)
         ).first()

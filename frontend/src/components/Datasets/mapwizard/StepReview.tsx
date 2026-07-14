@@ -1,4 +1,4 @@
-import { AlertTriangle, Layers2 } from "lucide-react";
+import { AlertTriangle, Layers2, X } from "lucide-react";
 import type {
   OrthoCompositeSelection,
   OrthoCurrent,
@@ -23,6 +23,7 @@ export interface StepReviewProps {
   onHover: (id: string | null) => void;
   onTogglePast: (pastId: string) => void;
   onToggleCurrent: (currentId: string) => void;
+  onClearSelection: () => void;
 }
 
 export function StepReview({
@@ -33,6 +34,7 @@ export function StepReview({
   onHover,
   onTogglePast,
   onToggleCurrent,
+  onClearSelection,
 }: StepReviewProps) {
   const images = allOrthoFeatures(groups);
   const pasts = images.filter((image): image is OrthoPast => image.era === "past");
@@ -84,9 +86,23 @@ export function StepReview({
               과년도 · 당해년도 선택
             </span>
           </div>
-          <span className="text-[11px] font-bold text-slate-400">
-            선택 {composite.pasts.length + composite.currents.length}장
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold text-slate-400">
+              선택 {composite.pasts.length + composite.currents.length}장
+            </span>
+            <button
+              type="button"
+              onClick={onClearSelection}
+              disabled={
+                composite.pasts.length + composite.currents.length === 0
+              }
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-black text-slate-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-white disabled:hover:text-slate-600"
+              aria-label="과년도와 당해년도 영상 선택 전체 해제"
+            >
+              <X size={12} />
+              전체 선택 해제
+            </button>
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-3 p-3">
           <ImageColumn
