@@ -49,6 +49,42 @@ def task_processing_footprint(
     task: TaskORM,
 ) -> TaskProcessingFootprint | None:
     """DB의 dataset/sheet geometry로 엔진 입력 공통 처리영역을 재구성한다."""
+    return task_processing_footprints(db, [task]).get(task.id)
+
+
+def task_processing_footprints(
+    db: Session,
+    tasks: Sequence[TaskORM],
+) -> dict[str, TaskProcessingFootprint]:
+    """여러 프로젝트의 처리영역을 dataset 단일 조회로 계산한다."""
+    resource_ids = {
+        resource_id
+        for task in tasks
+        for resource_id in [
+            *_resource_ids(task.standard_resource_ids, task.standard_resource_id),
+            *_resource_ids(task.compare_resource_ids, task.compare_resource_id),
+        ]
+    }
+    if not resource_ids:
+        return {}
+
+    rows = db.execute(
+        select(DatasetORM).where(DatasetORM.id.in_(resource_ids))
+    ).scalars().all()
+    geometries = {row.id: to_shape(row.bbox) for row in rows}
+    footprints: dict[str, TaskProcessingFootprint] = {}
+
+    for task in tasks:
+        footprint = _task_processing_footprint_from_geometries(task, geometries)
+        if footprint is not None:
+            footprints[task.id] = footprint
+    return footprints
+
+
+def _task_processing_footprint_from_geometries(
+    task: TaskORM,
+    geometries: dict[int, BaseGeometry],
+) -> TaskProcessingFootprint | None:
     standard_ids = _resource_ids(
         task.standard_resource_ids,
         task.standard_resource_id,
@@ -60,15 +96,17 @@ def task_processing_footprint(
     if not standard_ids or not compare_ids:
         return None
 
-    standard_rows = db.execute(
-        select(DatasetORM).where(DatasetORM.id.in_(standard_ids))
-    ).scalars().all()
-    compare_rows = db.execute(
-        select(DatasetORM).where(DatasetORM.id.in_(compare_ids))
-    ).scalars().all()
     geometry = intersect_processing_footprints(
-        [to_shape(row.bbox) for row in standard_rows],
-        [to_shape(row.bbox) for row in compare_rows],
+        [
+            geometries[resource_id]
+            for resource_id in standard_ids
+            if resource_id in geometries
+        ],
+        [
+            geometries[resource_id]
+            for resource_id in compare_ids
+            if resource_id in geometries
+        ],
     )
     if geometry is None:
         return None

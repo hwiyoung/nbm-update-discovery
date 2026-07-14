@@ -763,7 +763,7 @@ function SwipeMap({
 // 공용 — 베이스 타일 + 라벨 + 폴리곤 + 마커 + draw
 // ============================================================
 
-/** 과년도/당해년도 원본 정사영상 각각의 footprint 외곽선. */
+/** 과년도/당해년도 원본 정사영상 각각의 footprint 점선 외곽선. */
 function DatasetFootprintBoundaryLayer({
   datasets,
   side,
@@ -803,6 +803,7 @@ function DatasetFootprintBoundaryLayer({
         opacity: 1,
         fill: false,
         fillOpacity: 0,
+        dashArray: "8,5",
         interactive: false,
       }}
       eventHandlers={{}}

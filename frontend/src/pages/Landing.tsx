@@ -160,7 +160,7 @@ export default function Landing() {
                   대한민국 전역 처리 현황
                 </h3>
                 <p className="text-[11px] text-slate-500">
-                  권역 + 도엽 처리 상태 오버레이
+                  실제 처리영역 선택 오버레이
                 </p>
               </div>
             </header>

@@ -23,7 +23,11 @@ from app.models.task import TaskORM
 from app.schemas import Task, TaskCreatePayload, TaskUpdatePayload
 from app.services.serializers import task_to_schema
 from app.services.task_artifacts import delete_task_artifacts
-from app.services.task_processing_geometry import task_processing_footprint
+from app.services.task_processing_geometry import (
+    TaskProcessingFootprint,
+    task_processing_footprint,
+    task_processing_footprints,
+)
 from app.services.task_progress import write_task_progress
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -53,6 +57,22 @@ def _task_detection_count(db: Session, task_id: str) -> int:
             )
         )
         or 0
+    )
+
+
+def _task_response(
+    db: Session,
+    row: TaskORM,
+    detection_count: int = 0,
+    *,
+    footprint: TaskProcessingFootprint | None = None,
+) -> Task:
+    resolved = footprint or task_processing_footprint(db, row)
+    return task_to_schema(
+        row,
+        detection_count,
+        processing_geometry=(resolved.geometry_4326 if resolved else None),
+        processing_area_m2=(resolved.area_m2 if resolved else None),
     )
 
 
@@ -155,8 +175,17 @@ def list_tasks(db: Session = Depends(get_db)) -> list[Task]:
         .group_by(DetectionORM.task_id)
     ).all()
     counts: dict[str, int] = {tid: int(c) for tid, c in count_rows}
+    footprints = task_processing_footprints(db, rows)
 
-    return [task_to_schema(r, counts.get(r.id, 0)) for r in rows]
+    return [
+        _task_response(
+            db,
+            row,
+            counts.get(row.id, 0),
+            footprint=footprints.get(row.id),
+        )
+        for row in rows
+    ]
 
 
 @router.get("/{task_id}", response_model=Task)
@@ -173,13 +202,7 @@ def get_task(task_id: str, db: Session = Depends(get_db)) -> Task:
                 }
             },
         )
-    footprint = task_processing_footprint(db, row)
-    return task_to_schema(
-        row,
-        _task_detection_count(db, task_id),
-        processing_geometry=(footprint.geometry_4326 if footprint else None),
-        processing_area_m2=(footprint.area_m2 if footprint else None),
-    )
+    return _task_response(db, row, _task_detection_count(db, task_id))
 
 
 @router.post("", response_model=Task, status_code=202)
@@ -255,7 +278,7 @@ def create_task(payload: TaskCreatePayload, db: Session = Depends(get_db)) -> Ta
 
     if not payload.auto_run:
         # 신규 task — detection 0건.
-        return task_to_schema(row, 0)
+        return _task_response(db, row, 0)
 
     settings = get_settings()
     write_task_progress(
@@ -288,7 +311,7 @@ def create_task(payload: TaskCreatePayload, db: Session = Depends(get_db)) -> Ta
         # Celery worker 가 안 떠있어도 task row 는 남음 — 사용자가 재시도 가능.
         print(f"[create_task] Celery enqueue failed: {e}")
 
-    return task_to_schema(row, 0)
+    return _task_response(db, row, 0)
 
 
 @router.get("/{task_id}/status", response_model=Task)
@@ -361,7 +384,7 @@ def start_task(task_id: str, db: Session = Depends(get_db)) -> Task:
         print(f"[start_task] Celery enqueue failed: {e}")
 
     db.refresh(row)
-    return task_to_schema(row, _task_detection_count(db, row.id))
+    return _task_response(db, row, _task_detection_count(db, row.id))
 
 
 @router.post("/{task_id}/cancel", response_model=Task)
@@ -417,7 +440,7 @@ def cancel_task(task_id: str, db: Session = Depends(get_db)) -> Task:
         detail={},
     )
     db.refresh(row)
-    return task_to_schema(row, _task_detection_count(db, row.id))
+    return _task_response(db, row, _task_detection_count(db, row.id))
 
 
 @router.delete("/{task_id}")
@@ -563,4 +586,4 @@ def update_task(
         raise
     db.commit()
     db.refresh(row)
-    return task_to_schema(row, _task_detection_count(db, row.id))
+    return _task_response(db, row, _task_detection_count(db, row.id))
