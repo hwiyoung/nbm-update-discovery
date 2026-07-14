@@ -2,6 +2,18 @@
 
 이 프로젝트의 주요 변경 사항을 기록한다. 버전은 [Semantic Versioning](https://semver.org/)을 따른다.
 
+## [1.2.1] - 2026-07-14
+
+### Added
+
+- 완전 오프라인 서버용 애플리케이션·Docker 이미지 패키지 생성 스크립트를 추가했다.
+- 별도 모델 패키지, manifest, SHA-256 생성과 오프라인 이미지 적재·설치·검증 절차를 추가했다.
+
+### Changed
+
+- 오프라인 설치는 이미지를 다시 빌드하지 않고 `docker load`와 `docker compose up --no-build`를 사용한다.
+- 최초 설치는 DB·Redis 기동과 마이그레이션을 애플리케이션 시작보다 먼저 수행한다.
+
 ## [1.2.0] - 2026-07-14
 
 첫 번째 정식 GitHub Release 기준 버전이다.

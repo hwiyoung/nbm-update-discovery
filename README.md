@@ -280,6 +280,14 @@ docker compose down -v
 주요 변경 사항은 `CHANGELOG.md`에 기록하고, 운영 배포 기준 커밋에 `vX.Y.Z` annotated tag와 GitHub Release를 생성한다.
 이미 생성한 릴리즈 태그는 이동하거나 덮어쓰지 않으며, 운영 롤백은 이전 버전 이미지로 수행한다.
 
+완전 오프라인 서버용 배포 세트는 태그가 checkout된 깨끗한 작업트리에서 생성한다. 앱·Docker 이미지와 모델은 별도 압축 파일로 만들며 같은 manifest와 checksum으로 관리한다.
+
+```bash
+scripts/build-offline-package.sh X.Y.Z
+```
+
+설치 서버에서는 두 압축 파일을 같은 경로에 해제한 후 `scripts/install-offline.sh`를 실행한다. 자세한 절차는 `docs/DEPLOY_INSTALL_GUIDE.md`를 따른다.
+
 다른 서버에 배포할 때는 `.env.prod.example`을 `.env.prod`로 복사한 뒤 호스트 경로와 비밀값을 먼저 바꾼다.
 
 ```bash

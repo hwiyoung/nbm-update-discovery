@@ -52,6 +52,7 @@ logs/
 *.tsbuildinfo
 coverage/
 .cache/
+releases/
 
 # --- Project-specific ---
 .codex-backups/
