@@ -93,19 +93,19 @@ export function TaskRow({ task, totalDetections }: TaskRowProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [canceling, setCanceling] = useState(false);
-  const flyToSheets = useSheetsStore((s) => s.flyToSheets);
-  const setHighlightedCodes = useSheetsStore((s) => s.setHighlightedCodes);
+  const setHighlightedTask = useSheetsStore((s) => s.setHighlightedTask);
+  const selectedTaskId = useSheetsStore((s) => s.selectedTaskId);
+  const setSelectedTask = useSheetsStore((s) => s.setSelectedTask);
   const deleteTask = useTasksStore((s) => s.deleteTask);
   const cancelTask = useTasksStore((s) => s.cancelTask);
   const progressMessage = taskProgressMessageText(task);
 
   const onOpenDetail = () => navigate(`/tasks/${task.id}`);
   const onFly = () => {
-    if (task.sheet_codes.length === 0) return;
-    flyToSheets(task.sheet_codes);
+    setSelectedTask(task.id);
   };
-  const onMouseEnter = () => setHighlightedCodes(task.sheet_codes);
-  const onMouseLeave = () => setHighlightedCodes([]);
+  const onMouseEnter = () => setHighlightedTask(task.id);
+  const onMouseLeave = () => setHighlightedTask(null);
 
   const onDelete = async () => {
     if (deleting) return;
@@ -118,6 +118,7 @@ export function TaskRow({ task, totalDetections }: TaskRowProps) {
     toast.loading("프로젝트 삭제 중…", { id: tid });
     try {
       await deleteTask(task.id);
+      if (selectedTaskId === task.id) setSelectedTask(null);
       toast.success("프로젝트가 삭제되었습니다", { id: tid });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "삭제 실패", { id: tid });
@@ -153,8 +154,11 @@ export function TaskRow({ task, totalDetections }: TaskRowProps) {
       onMouseLeave={onMouseLeave}
       className={cn(
         "group bg-white border rounded-md px-3 py-2 transition-shadow cursor-pointer",
-        "border-slate-100 hover:border-blue-200 hover:shadow-sm",
+        selectedTaskId === task.id
+          ? "border-blue-300 bg-blue-50/40 shadow-sm"
+          : "border-slate-100 hover:border-blue-200 hover:shadow-sm",
       )}
+      aria-current={selectedTaskId === task.id ? "true" : undefined}
     >
       {/* 행 1: 작업명 + 수정 / 삭제 버튼 + 상태 */}
       <div className="flex items-center gap-1.5">

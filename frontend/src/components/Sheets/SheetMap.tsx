@@ -1,39 +1,52 @@
-import { useEffect, useMemo, useRef } from "react";
-import { GeoJSON, MapContainer, TileLayer, useMap } from "react-leaflet";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  GeoJSON,
+  MapContainer,
+  Popup,
+  TileLayer,
+  useMap,
+  useMapEvents,
+} from "react-leaflet";
 import L from "leaflet";
-import type { GeoJSON as LeafletGeoJSON, PathOptions } from "leaflet";
-import type { Feature, FeatureCollection, Polygon } from "geojson";
-import { useSheetsStore, useFilteredSheets } from "@/stores/sheetsStore";
+import type {
+  GeoJSON as LeafletGeoJSON,
+  LeafletMouseEvent,
+  PathOptions,
+} from "leaflet";
+import type {
+  Feature,
+  FeatureCollection,
+  MultiPolygon,
+  Polygon,
+} from "geojson";
+import { useSheetsStore } from "@/stores/sheetsStore";
 import { useDatasetsStore } from "@/stores/datasetsStore";
-import type { Dataset, MapSheet, ReviewStatus } from "@/types";
+import { useTasksStore } from "@/stores/tasksStore";
+import type { Dataset, Task } from "@/types";
 
 /**
  * /sheets 의 한국 전도 지도 — React-Leaflet.
  *
  * 레이어 구성:
  *   1) 권역 디졸브 GeoJSON (8 features). 기본 배경.
- *   2) 도엽 메타 폴리곤 (sheets[].geometry). filter / hover / 선택 상태 동기화.
+ *   2) 프로젝트 실제 처리영역 (과년도 합집합 ∩ 당해년도 합집합).
  *
  * 동기화:
- *   - hoveredSheetCode: row hover 시 폴리곤 강조 (얇은 ring).
- *   - selectedSheetCode + flyTick: row 클릭 시 해당 폴리곤으로 fly + 강한 강조.
+ *   - 프로젝트 row/폴리곤 hover: 파란색 미리보기.
+ *   - 프로젝트 row/폴리곤 클릭: 파란색 선택 유지 + 실제 처리영역으로 fly.
  */
 const KOREA_CENTER: [number, number] = [36.5, 127.8];
 const KOREA_ZOOM = 7;
 
-const STATUS_FILL: Record<ReviewStatus, string> = {
-  pending: "#cbd5e1",
-  in_progress: "#3b82f6",
-  completed: "#10b981",
-  on_hold: "#f59e0b",
-};
+const INACTIVE_FILL = "#cbd5e1";
+const INACTIVE_STROKE = "#475569";
+const ACTIVE_FILL = "#3b82f6";
+const ACTIVE_STROKE = "#2563eb";
 
-const STATUS_STROKE: Record<ReviewStatus, string> = {
-  pending: "#475569",
-  in_progress: "#1d4ed8",
-  completed: "#047857",
-  on_hold: "#b45309",
-};
+interface OverlapProjectChoice {
+  position: [number, number];
+  tasks: Task[];
+}
 
 /**
  * 권역별 categorical palette — ColorBrewer Set2 변형. 인접 권역끼리도 색이
@@ -78,14 +91,42 @@ function regionStyle(region: string, isActive: boolean): PathOptions {
 
 export function SheetMap() {
   const regions = useSheetsStore((s) => s.regions);
-  const sheets = useSheetsStore((s) => s.sheets);
   const activeRegion = useSheetsStore((s) => s.filter.region);
-  const filteredCodes = useFilteredCodesSet();
-  const hoveredCode = useSheetsStore((s) => s.hoveredSheetCode);
-  const setHovered = useSheetsStore((s) => s.setHoveredSheet);
-  const setSelectedSheet = useSheetsStore((s) => s.setSelectedSheet);
-  const selectedCode = useSheetsStore((s) => s.selectedSheetCode);
-  const highlighted = useSheetsStore((s) => s.highlightedSheetCodes);
+  const highlightedTaskId = useSheetsStore((s) => s.highlightedTaskId);
+  const selectedTaskId = useSheetsStore((s) => s.selectedTaskId);
+  const setHighlightedTask = useSheetsStore((s) => s.setHighlightedTask);
+  const setSelectedTask = useSheetsStore((s) => s.setSelectedTask);
+  const tasks = useTasksStore((s) => s.tasks);
+  const activeTaskId = highlightedTaskId ?? selectedTaskId;
+  const [overlapChoice, setOverlapChoice] =
+    useState<OverlapProjectChoice | null>(null);
+
+  useEffect(() => {
+    setOverlapChoice(null);
+  }, [selectedTaskId]);
+
+  const handleTaskAreaClick = (
+    clickedTaskId: string,
+    event: LeafletMouseEvent,
+  ) => {
+    const { lng, lat } = event.latlng;
+    const overlappingTasks = tasks.filter(
+      (task) =>
+        task.processing_geometry != null &&
+        pointInProcessingGeometry(lng, lat, task.processing_geometry),
+    );
+    const candidates = overlappingTasks.length > 0
+      ? overlappingTasks
+      : tasks.filter((task) => task.id === clickedTaskId);
+
+    setHighlightedTask(null);
+    if (candidates.length <= 1) {
+      setOverlapChoice(null);
+      if (candidates[0]) setSelectedTask(candidates[0].id);
+      return;
+    }
+    setOverlapChoice({ position: [lat, lng], tasks: candidates });
+  };
 
   if (!regions) {
     return (
@@ -111,20 +152,81 @@ export function SheetMap() {
         maxZoom={16}
       />
       <RegionsLayer data={regions} activeRegion={activeRegion} />
-      <SheetsLayer
-        sheets={sheets}
-        filteredCodes={filteredCodes}
-        hoveredCode={hoveredCode}
-        selectedCode={selectedCode}
-        highlightedCodes={highlighted}
-        onSheetHover={setHovered}
-        onSheetSelect={setSelectedSheet}
+      <ProjectProcessingAreasLayer
+        tasks={tasks}
+        activeTaskId={activeTaskId}
+        onTaskHover={setHighlightedTask}
+        onTaskClick={handleTaskAreaClick}
       />
-      <SelectedSheetFlyController />
-      <BoundsFlyController />
+      <SelectedTaskFlyController tasks={tasks} />
       <SelectedDatasetBboxLayer />
+      {overlapChoice ? (
+        <Popup
+          position={overlapChoice.position}
+          closeButton
+          closeOnClick={false}
+          autoPan
+          eventHandlers={{
+            remove: () => {
+              setOverlapChoice(null);
+              setHighlightedTask(null);
+            },
+          }}
+        >
+          <div className="min-w-64 py-1">
+            <div className="text-sm font-bold text-slate-800">
+              겹치는 프로젝트 {overlapChoice.tasks.length}개
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              선택할 프로젝트를 골라주세요.
+            </p>
+            <div className="mt-2 space-y-1">
+              {overlapChoice.tasks.map((task) => (
+                <button
+                  key={task.id}
+                  type="button"
+                  onMouseEnter={() => setHighlightedTask(task.id)}
+                  onMouseLeave={() => setHighlightedTask(null)}
+                  onClick={() => {
+                    setSelectedTask(task.id);
+                    setHighlightedTask(null);
+                    setOverlapChoice(null);
+                  }}
+                  className={`flex w-full items-center justify-between gap-3 rounded-md border px-2.5 py-2 text-left transition-colors ${
+                    task.id === selectedTaskId
+                      ? "border-blue-300 bg-blue-50 text-blue-800"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
+                  }`}
+                >
+                  <span className="min-w-0 truncate text-xs font-semibold">
+                    {task.name}
+                  </span>
+                  <span className="shrink-0 text-[11px] tabular-nums text-slate-500">
+                    {formatProcessingArea(task.processing_area_m2)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </Popup>
+      ) : null}
+      <MapSelectionClearController
+        onClear={() => setOverlapChoice(null)}
+      />
     </MapContainer>
   );
+}
+
+/** 지도 빈 공간 클릭 시 프로젝트 선택을 해제. */
+function MapSelectionClearController({ onClear }: { onClear: () => void }) {
+  const clearMapSelection = useSheetsStore((s) => s.clearMapSelection);
+  useMapEvents({
+    click: () => {
+      onClear();
+      clearMapSelection();
+    },
+  });
+  return null;
 }
 
 // ============================================================
@@ -276,94 +378,103 @@ function RegionsLayer({
 }
 
 // ============================================================
-// 도엽 메타 폴리곤
+// 프로젝트 실제 처리영역 폴리곤
 // ============================================================
-function SheetsLayer({
-  sheets,
-  filteredCodes,
-  hoveredCode,
-  selectedCode,
-  highlightedCodes,
-  onSheetHover,
-  onSheetSelect,
+function ProjectProcessingAreasLayer({
+  tasks,
+  activeTaskId,
+  onTaskHover,
+  onTaskClick,
 }: {
-  sheets: MapSheet[];
-  filteredCodes: Set<string>;
-  hoveredCode: string | null;
-  selectedCode: string | null;
-  highlightedCodes: Set<string>;
-  onSheetHover: (code: string | null) => void;
-  onSheetSelect: (code: string | null) => void;
+  tasks: Task[];
+  activeTaskId: string | null;
+  onTaskHover: (taskId: string | null) => void;
+  onTaskClick: (taskId: string, event: LeafletMouseEvent) => void;
 }) {
-  const fc = useMemo<FeatureCollection<Polygon>>(() => {
+  const fc = useMemo<FeatureCollection<Polygon | MultiPolygon>>(() => {
     return {
       type: "FeatureCollection",
-      features: sheets.map((s) => ({
-        type: "Feature",
-        properties: { code: s.code, name: s.name, status: s.review_status },
-        geometry: s.geometry,
-      })),
+      // 최신 프로젝트가 겹친 영역에서 위에 오도록 오래된 순서로 그린다.
+      features: [...tasks]
+        .reverse()
+        .filter(
+          (
+            task,
+          ): task is Task & {
+            processing_geometry: Polygon | MultiPolygon;
+          } =>
+            task.processing_geometry != null,
+        )
+        .map((task) => ({
+          type: "Feature",
+          properties: {
+            taskId: task.id,
+            name: task.name,
+            areaM2: task.processing_area_m2,
+          },
+          geometry: task.processing_geometry,
+        })),
     };
-  }, [sheets]);
+  }, [tasks]);
+  const geometryKey = useMemo(
+    () =>
+      fc.features
+        .map(
+          (feature) =>
+            `${String(feature.properties?.taskId)}:${JSON.stringify(feature.geometry.coordinates)}`,
+        )
+        .join("|"),
+    [fc],
+  );
 
   const layerRef = useRef<LeafletGeoJSON | null>(null);
-  const sheetByCode = useMemo(() => {
-    const m = new Map<string, MapSheet>();
-    for (const s of sheets) m.set(s.code, s);
-    return m;
-  }, [sheets]);
 
-  // filter / hover / selection / highlight 변경 시 색만 갱신 (재생성 없음)
   useEffect(() => {
     const layer = layerRef.current;
     if (!layer) return;
     layer.eachLayer((sub) => {
       const f = (sub as { feature?: Feature }).feature;
-      const code = String(f?.properties?.code ?? "");
-      const meta = sheetByCode.get(code);
-      const isFiltered = filteredCodes.has(code);
-      const isHovered = hoveredCode === code;
-      const isSelected = selectedCode === code;
-      const isHighlighted = highlightedCodes.has(code);
+      const taskId = String(f?.properties?.taskId ?? "");
+      const isActive = taskId === activeTaskId;
       (sub as unknown as { setStyle: (s: PathOptions) => void }).setStyle(
-        sheetStyle(meta, isFiltered, isHovered, isSelected, isHighlighted),
+        processingAreaStyle(isActive),
       );
-      if (isSelected || isHighlighted) {
+      if (isActive) {
         (sub as unknown as { bringToFront: () => void }).bringToFront();
       }
     });
-  }, [sheetByCode, filteredCodes, hoveredCode, selectedCode, highlightedCodes]);
+  }, [activeTaskId]);
+
+  if (fc.features.length === 0) return null;
 
   return (
     <GeoJSON
-      key={`sheets-${sheets.length}`}
+      key={`processing-areas-${geometryKey}`}
       ref={(layer) => {
         layerRef.current = layer ?? null;
       }}
       data={fc}
       style={(feature) => {
-        const code = String(feature?.properties?.code ?? "");
-        return sheetStyle(
-          sheetByCode.get(code),
-          filteredCodes.has(code),
-          hoveredCode === code,
-          selectedCode === code,
-          highlightedCodes.has(code),
-        );
+        const taskId = String(feature?.properties?.taskId ?? "");
+        return processingAreaStyle(taskId === activeTaskId);
       }}
       onEachFeature={(feature, sub) => {
-        const code = String(feature.properties?.code ?? "");
-        const name = String(feature.properties?.name ?? code);
-        sub.bindTooltip(`${name} (${code})`, {
+        const taskId = String(feature.properties?.taskId ?? "");
+        const name = String(feature.properties?.name ?? taskId);
+        const areaText = formatProcessingArea(
+          Number(feature.properties?.areaM2 ?? 0),
+        );
+        sub.bindTooltip(`${name} · ${areaText}`, {
           sticky: true,
           direction: "top",
+          className: "leaflet-tooltip-soft",
         });
         sub.on({
-          mouseover: () => onSheetHover(code),
-          mouseout: () => onSheetHover(null),
-          click: (e) => {
-            onSheetSelect(code);
-            L.DomEvent.stopPropagation(e);
+          mouseover: () => onTaskHover(taskId),
+          mouseout: () => onTaskHover(null),
+          click: (event) => {
+            onTaskClick(taskId, event);
+            L.DomEvent.stopPropagation(event);
           },
         });
       }}
@@ -371,100 +482,119 @@ function SheetsLayer({
   );
 }
 
-function sheetStyle(
-  meta: MapSheet | undefined,
-  isFiltered: boolean,
-  isHovered: boolean,
-  isSelected: boolean,
-  isHighlighted: boolean,
-): PathOptions {
-  if (!meta) return { opacity: 0, fillOpacity: 0 };
-  if (!isFiltered) {
-    return {
-      color: "#94a3b8",
-      weight: 0.8,
-      fillColor: "#cbd5e1",
-      fillOpacity: 0.15,
-      opacity: 0.4,
-    };
+function formatProcessingArea(areaM2: number | null | undefined): string {
+  if (!areaM2 || areaM2 <= 0) return "면적 정보 없음";
+  return `${(areaM2 / 1_000_000).toLocaleString("ko-KR", {
+    maximumFractionDigits: 2,
+  })} km²`;
+}
+
+function pointInProcessingGeometry(
+  lng: number,
+  lat: number,
+  geometry: Polygon | MultiPolygon,
+): boolean {
+  const polygons =
+    geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
+  return polygons.some((polygon) => {
+    const [outer, ...holes] = polygon;
+    return (
+      pointInRing(lng, lat, outer) &&
+      !holes.some((hole) => pointInRing(lng, lat, hole))
+    );
+  });
+}
+
+function pointInRing(
+  lng: number,
+  lat: number,
+  ring: Polygon["coordinates"][number],
+): boolean {
+  if (ring.length < 3) return false;
+  let inside = false;
+  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index++) {
+    const [currentLng, currentLat] = ring[index];
+    const [previousLng, previousLat] = ring[previous];
+    if (
+      pointOnSegment(
+        lng,
+        lat,
+        previousLng,
+        previousLat,
+        currentLng,
+        currentLat,
+      )
+    ) {
+      return true;
+    }
+    const crossesLatitude = (currentLat > lat) !== (previousLat > lat);
+    if (
+      crossesLatitude &&
+      lng <
+        ((previousLng - currentLng) * (lat - currentLat)) /
+          (previousLat - currentLat) +
+          currentLng
+    ) {
+      inside = !inside;
+    }
   }
-  if (isSelected) {
+  return inside;
+}
+
+function pointOnSegment(
+  lng: number,
+  lat: number,
+  startLng: number,
+  startLat: number,
+  endLng: number,
+  endLat: number,
+): boolean {
+  const cross =
+    (lng - startLng) * (endLat - startLat) -
+    (lat - startLat) * (endLng - startLng);
+  if (Math.abs(cross) > 1e-10) return false;
+  return (
+    lng >= Math.min(startLng, endLng) - 1e-10 &&
+    lng <= Math.max(startLng, endLng) + 1e-10 &&
+    lat >= Math.min(startLat, endLat) - 1e-10 &&
+    lat <= Math.max(startLat, endLat) + 1e-10
+  );
+}
+
+function processingAreaStyle(isActive: boolean): PathOptions {
+  if (isActive) {
     return {
-      color: STATUS_STROKE[meta.review_status],
-      weight: 4,
-      fillColor: STATUS_FILL[meta.review_status],
-      fillOpacity: 0.6,
-      opacity: 1,
-      dashArray: undefined,
-    };
-  }
-  if (isHighlighted) {
-    return {
-      color: "#2563eb",
-      weight: 2.5,
-      fillColor: "#3b82f6",
-      fillOpacity: 0.45,
+      color: ACTIVE_STROKE,
+      weight: 3,
+      fillColor: ACTIVE_FILL,
+      fillOpacity: 0.42,
       opacity: 1,
     };
   }
   return {
-    color: STATUS_STROKE[meta.review_status],
-    weight: isHovered ? 2.5 : 1.4,
-    fillColor: STATUS_FILL[meta.review_status],
-    fillOpacity: isHovered ? 0.55 : 0.35,
-    opacity: 1,
+    color: INACTIVE_STROKE,
+    weight: 1.8,
+    fillColor: INACTIVE_FILL,
+    fillOpacity: 0.28,
+    opacity: 0.8,
   };
 }
 
 // ============================================================
-// 선택된 도엽으로 fly — flyTick 변경 시 발동
+// 선택된 프로젝트의 실제 처리영역으로 fly
 // ============================================================
-function SelectedSheetFlyController() {
+function SelectedTaskFlyController({ tasks }: { tasks: Task[] }) {
   const map = useMap();
-  const selectedCode = useSheetsStore((s) => s.selectedSheetCode);
-  const flyTick = useSheetsStore((s) => s.flyTick);
-  const sheets = useSheetsStore((s) => s.sheets);
+  const selectedTaskId = useSheetsStore((s) => s.selectedTaskId);
+  const selectedTaskTick = useSheetsStore((s) => s.selectedTaskTick);
 
   useEffect(() => {
-    if (!selectedCode) return;
-    const sheet = sheets.find((s) => s.code === selectedCode);
-    if (!sheet) return;
-    const ring = sheet.geometry.coordinates[0] ?? [];
-    if (ring.length < 2) return;
-    let minLng = Infinity;
-    let minLat = Infinity;
-    let maxLng = -Infinity;
-    let maxLat = -Infinity;
-    for (const [lng, lat] of ring) {
-      if (lng < minLng) minLng = lng;
-      if (lng > maxLng) maxLng = lng;
-      if (lat < minLat) minLat = lat;
-      if (lat > maxLat) maxLat = lat;
-    }
-    map.flyToBounds(
-      [
-        [minLat, minLng],
-        [maxLat, maxLng],
-      ],
-      { padding: [80, 80], maxZoom: 13, duration: 0.7 },
-    );
-    // flyTick 만 dep 가 아니라 selectedCode 도 dep — 다른 도엽 선택 시도 발동
-  }, [flyTick, selectedCode, sheets, map]);
-
-  return null;
-}
-
-// ============================================================
-// flyToSheets — 프로젝트 row 클릭 시 N매 도엽 union bbox 로 fly
-// ============================================================
-function BoundsFlyController() {
-  const map = useMap();
-  const flyBounds = useSheetsStore((s) => s.flyBounds);
-  const tick = useSheetsStore((s) => s.flyBoundsTick);
-
-  useEffect(() => {
-    if (!flyBounds || tick === 0) return;
-    const [minLng, minLat, maxLng, maxLat] = flyBounds;
+    const geometry = tasks.find(
+      (task) => task.id === selectedTaskId,
+    )?.processing_geometry;
+    const extent = processingGeometryExtent(geometry ?? null);
+    if (!extent) return;
+    const [minLng, minLat, maxLng, maxLat] = extent;
     map.flyToBounds(
       [
         [minLat, minLng],
@@ -472,15 +602,34 @@ function BoundsFlyController() {
       ],
       { padding: [60, 60], maxZoom: 13, duration: 0.7 },
     );
-  }, [tick, flyBounds, map]);
+  }, [selectedTaskTick, selectedTaskId, tasks, map]);
 
   return null;
 }
 
-// ============================================================
-// selectors
-// ============================================================
-function useFilteredCodesSet(): Set<string> {
-  const filtered = useFilteredSheets();
-  return useMemo(() => new Set(filtered.map((s) => s.code)), [filtered]);
+function processingGeometryExtent(
+  geometry: Polygon | MultiPolygon | null,
+): [number, number, number, number] | null {
+  if (!geometry) return null;
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+  const polygons =
+    geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
+
+  for (const polygon of polygons) {
+    for (const ring of polygon) {
+      for (const [lng, lat] of ring) {
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+        minLng = Math.min(minLng, lng);
+        minLat = Math.min(minLat, lat);
+        maxLng = Math.max(maxLng, lng);
+        maxLat = Math.max(maxLat, lat);
+      }
+    }
+  }
+
+  if (![minLng, minLat, maxLng, maxLat].every(Number.isFinite)) return null;
+  return [minLng, minLat, maxLng, maxLat];
 }

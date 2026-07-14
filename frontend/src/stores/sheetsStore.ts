@@ -15,8 +15,12 @@ interface SheetsState {
   /** 8개 권역 디졸브 GeoJSON (지도 기본 overlay). */
   regions: GeoJSON.FeatureCollection | null;
   hoveredSheetCode: string | null;
-  /** 프로젝트 row hover 시 강조할 도엽 코드 집합. row click 과 분리. */
-  highlightedSheetCodes: Set<string>;
+  /** 프로젝트 row/처리영역 hover 미리보기. */
+  highlightedTaskId: string | null;
+  /** 클릭해 선택한 프로젝트. 지도에서 해당 프로젝트 도엽을 파란색으로 유지. */
+  selectedTaskId: string | null;
+  /** 같은 프로젝트를 다시 클릭해도 실제 처리영역으로 fly 하기 위한 ticker. */
+  selectedTaskTick: number;
   /** 사용자가 row 클릭 등으로 "포커스" 한 도엽. 지도가 fly 하고 강조 표시. */
   selectedSheetCode: string | null;
   /** 선택 후 1회만 fly 하도록 ticker 증가 (같은 코드 재클릭 시도 다시 fly). */
@@ -31,8 +35,10 @@ interface SheetsState {
   setFilter: (partial: Partial<SheetFilter>) => void;
   resetFilter: () => void;
   setHoveredSheet: (code: string | null) => void;
-  setHighlightedCodes: (codes: string[]) => void;
+  setHighlightedTask: (taskId: string | null) => void;
+  setSelectedTask: (taskId: string | null) => void;
   setSelectedSheet: (code: string | null) => void;
+  clearMapSelection: () => void;
   /** sheet_codes 의 union bbox 로 지도 fly. 코드가 store 에 있는 sheet 들로 한정. */
   flyToSheets: (codes: string[]) => void;
   loadSheets: () => Promise<void>;
@@ -51,7 +57,9 @@ export const useSheetsStore = create<SheetsState>((set, get) => ({
   sheets: [],
   regions: null,
   hoveredSheetCode: null,
-  highlightedSheetCodes: new Set(),
+  highlightedTaskId: null,
+  selectedTaskId: null,
+  selectedTaskTick: 0,
   selectedSheetCode: null,
   flyTick: 0,
   flyBounds: null,
@@ -64,14 +72,23 @@ export const useSheetsStore = create<SheetsState>((set, get) => ({
     set((state) => ({ filter: { ...state.filter, ...partial } })),
   resetFilter: () => set({ filter: { ...initialFilter } }),
   setHoveredSheet: (code) => set({ hoveredSheetCode: code }),
-  setHighlightedCodes: (codes) =>
-    set({ highlightedSheetCodes: new Set(codes) }),
+  setHighlightedTask: (taskId) => set({ highlightedTaskId: taskId }),
+  setSelectedTask: (taskId) =>
+    set((state) => ({
+      selectedTaskId: taskId,
+      selectedTaskTick: taskId
+        ? state.selectedTaskTick + 1
+        : state.selectedTaskTick,
+      selectedSheetCode: null,
+    })),
   setSelectedSheet: (code) =>
     set((state) => ({
       selectedSheetCode: code,
       // 같은 코드를 다시 눌러도 fly 가 다시 발동되도록 tick 증가
       flyTick: code ? state.flyTick + 1 : state.flyTick,
     })),
+  clearMapSelection: () =>
+    set({ selectedTaskId: null, selectedSheetCode: null }),
   flyToSheets: (codes) => {
     if (codes.length === 0) return;
     const sheetByCode = new Map(get().sheets.map((s) => [s.code, s]));

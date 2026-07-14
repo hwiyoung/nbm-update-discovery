@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import type { MouseEvent } from "react";
 import { NotificationsBell } from "./NotificationsBell";
 
 /**
@@ -9,17 +9,39 @@ import { NotificationsBell } from "./NotificationsBell";
  * 메인 화면 통합 후 전역 사이드바·nav 항목 모두 제거. 단일 진입점.
  */
 export function Header() {
+  const reloadHome = (event: MouseEvent<HTMLAnchorElement>) => {
+    // 새 탭/새 창 열기는 브라우저 기본 동작을 유지한다.
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${window.location.search}#/`,
+    );
+    window.location.reload();
+  };
+
   return (
     <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 z-[3000] shadow-sm shrink-0">
       <div className="flex items-center gap-2">
-        <Link
-          to="/"
+        <a
+          href="/#/"
+          onClick={reloadHome}
           className="flex items-center gap-2 subpixel-antialiased hover:opacity-80 transition-opacity"
           style={{
             fontFamily:
               "-apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif",
           }}
-          aria-label="메인으로 이동"
+          aria-label="메인 화면 새로고침"
+          title="메인 화면 새로고침"
         >
           <img
             src="/siqms_mark.png"
@@ -27,9 +49,13 @@ export function Header() {
             className="w-[64px] h-[64px] object-contain"
           />
           <h1 className="font-bold text-lg text-slate-800 tracking-tight">
-            공간정보품질관리원 <span className="font-normal text-slate-500">| AI 기반 품질검증 지원 시스템 - 국가기본도 수시갱신 대상지역 추출</span>
+            공간정보품질관리원{" "}
+            <span className="font-normal text-slate-500">
+              | AI 기반 품질검증 지원 시스템 - 국가기본도 수시갱신
+              대상지역 추출
+            </span>
           </h1>
-        </Link>
+        </a>
       </div>
 
       <div className="flex items-center gap-4">
