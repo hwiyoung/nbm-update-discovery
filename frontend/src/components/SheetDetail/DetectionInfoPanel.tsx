@@ -28,7 +28,6 @@ const CHANGE_OPTIONS_BY_MODEL: Record<ObjectCategory, { value: ChangeType; label
   ],
   road: [
     { value: "road_new", label: "신설" },
-    { value: "road_updated", label: "갱신" },
     { value: "road_removed", label: "소멸" },
   ],
 };
