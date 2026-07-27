@@ -326,7 +326,10 @@ export const useSheetDetailStore = create<Store>((set, get) => ({
   resetFilter: () => set({ filter: { ...initialFilter } }),
 
   setViewerMode: (viewerMode) => set({ viewerMode }),
-  setEditTool: (editTool) => set({ editTool, selectedIds: [] }),
+  setEditTool: (editTool) => set({
+    editTool,
+    selectedIds: [],
+  }),
 
   selectFlyTick: 0,
   selectAndFly: (id) =>
@@ -396,7 +399,7 @@ export const useSheetDetailStore = create<Store>((set, get) => ({
     if (patch.change_type !== undefined) before.change_type = det.change_type;
     await updateDetection(det.sheet_code, id, patch, sheet.task_id ?? null);
     pushHistory(set, [makeHistoryEntry({
-      det, action: "edit_meta", before, after: patch, memo: null,
+      det, action: "classify", before, after: patch, memo: null,
     })]);
     await refreshDetections(set, sheet);
   },

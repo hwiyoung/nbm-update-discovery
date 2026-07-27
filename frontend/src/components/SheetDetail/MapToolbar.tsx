@@ -17,8 +17,8 @@ const TOOLS: {
   label: string;
   guard: () => boolean;
 }[] = [
-  { code: "select", icon: <MousePointer size={16} />, label: "단일 선택", guard: () => true },
-  { code: "lasso", icon: <Lasso size={16} />, label: "다중 선택", guard: () => true },
+  { code: "select", icon: <MousePointer size={16} />, label: "선택 (Shift+드래그 영역 다중 선택)", guard: () => true },
+  { code: "lasso", icon: <Lasso size={16} />, label: "다중 선택 (드래그)", guard: () => true },
   { code: "draw", icon: <Pencil size={16} />, label: "폴리곤 그리기", guard: () => auth.canCreateDetection() },
   { code: "edit", icon: <Edit3 size={16} />, label: "폴리곤 편집", guard: () => auth.canEditGeometry() },
 ];
@@ -63,7 +63,7 @@ export function MapToolbar() {
       {tool === "lasso" || tool === "draw" || tool === "edit" || selectedCount > 1 ? (
         <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[400] flex items-center gap-2 bg-white/95 border border-slate-200 rounded-md shadow-sm px-2.5 py-1 text-[11px] text-slate-600">
           {tool === "lasso" ? (
-            <span>지도에서 박스를 그리거나 폴리곤을 클릭해 다중 선택</span>
+            <span>드래그로 영역 선택 · Shift+드래그로 기존 선택에 추가</span>
           ) : tool === "draw" ? (
             <span>지도 클릭으로 폴리곤을 그리고 더블클릭으로 완료</span>
           ) : tool === "edit" ? (
@@ -72,6 +72,8 @@ export function MapToolbar() {
             ) : (
               <span>폴리곤을 클릭해 선택하면 편집이 활성화됩니다</span>
             )
+          ) : selectedCount > 1 ? (
+            <span>Shift+드래그로 영역을 추가 선택할 수 있습니다</span>
           ) : null}
           {selectedCount > 1 ? (
             <span className="font-bold text-blue-600">{selectedCount}건 선택</span>

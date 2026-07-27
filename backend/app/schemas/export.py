@@ -8,6 +8,12 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class ExportSelectionRequest(BaseModel):
+    """관심지역에서 계산한 객체 ID 목록으로 결과를 제한한다."""
+
+    object_ids: list[str] = Field(default_factory=list, max_length=100_000)
+
+
 class Export3dDxfRequest(BaseModel):
     """엔드포인트 요청 본문."""
 
@@ -16,6 +22,7 @@ class Export3dDxfRequest(BaseModel):
         max_length=64,
         description="DXF 내부 레이어명. ASCII/숫자/_- 권장.",
     )
+    object_ids: list[str] | None = Field(default=None, max_length=100_000)
 
 
 class Export3dStatistics(BaseModel):

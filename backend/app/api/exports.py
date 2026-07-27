@@ -29,6 +29,7 @@ from app.schemas.export import (
     Export3dDxfRequest,
     Export3dDxfResponse,
     Export3dStatistics,
+    ExportSelectionRequest,
 )
 from app.services.dem_z_registry import get_dem_z_service, get_init_error
 # detection_gpkg 는 함수 안에서 geopandas 를 import 하므로 모듈 상단 import 안전.
@@ -54,13 +55,37 @@ def export_task_shapefile(
     db: Session = Depends(get_db),
 ) -> Response:
     """Task의 활성 변화탐지 결과를 UTF-8 Shapefile ZIP으로 반환한다."""
+    return _export_task_shapefile(task_id, db, object_ids=None)
+
+
+@router.post("/{task_id}/export/shp")
+def export_selected_task_shapefile(
+    task_id: str,
+    body: ExportSelectionRequest,
+    db: Session = Depends(get_db),
+) -> Response:
+    """관심지역에 포함된 변화탐지 객체만 Shapefile ZIP으로 반환한다."""
+    return _export_task_shapefile(task_id, db, object_ids=body.object_ids)
+
+
+def _export_task_shapefile(
+    task_id: str,
+    db: Session,
+    *,
+    object_ids: list[str] | None,
+) -> Response:
     task = db.get(TaskORM, task_id)
     if task is None:
         raise HTTPException(404, f"Task not found: {task_id}")
 
     safe_task_id = re.sub(r"[^A-Za-z0-9_-]", "_", task_id)[:64] or "task"
     layer_name = f"nbm_{safe_task_id}_detections"
-    content, count = create_task_shapefile_zip(db, task_id, layer_name)
+    content, count = create_task_shapefile_zip(
+        db,
+        task_id,
+        layer_name,
+        object_ids=object_ids,
+    )
     if count == 0:
         return JSONResponse(
             status_code=400,
@@ -125,7 +150,11 @@ def export_task_3d_dxf(
     )
 
     # 1) detection → 임시 GPKG (5186)
-    gpkg_path, count = write_task_detections_gpkg(db, task_id)
+    gpkg_path, count = write_task_detections_gpkg(
+        db,
+        task_id,
+        object_ids=body.object_ids,
+    )
     if count == 0:
         return JSONResponse(
             status_code=400,

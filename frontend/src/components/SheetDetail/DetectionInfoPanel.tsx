@@ -86,7 +86,8 @@ export function DetectionInfoPanel() {
   if (selectedIds.length === 0) {
     return (
       <EmptyHint>
-        지도에서 폴리곤을 클릭하면 객체 정보가 표시됩니다.
+        지도에서 폴리곤을 클릭하면 객체 정보가 표시됩니다. 여러 객체는 Shift를 누른
+        채 드래그하거나 다중 선택 도구로 선택할 수 있습니다.
       </EmptyHint>
     );
   }
@@ -213,7 +214,7 @@ export function DetectionInfoPanel() {
             </div>
           </div>
           <p className="text-[11px] text-slate-500">
-            지도에서 꼭짓점을 드래그해 형태도 수정 가능. 다른 모드로 전환 시 자동 저장.
+            꼭짓점 이동·추가가 끝나면 자동 저장되고 선택 모드로 전환됩니다.
           </p>
         </div>
       ) : null}

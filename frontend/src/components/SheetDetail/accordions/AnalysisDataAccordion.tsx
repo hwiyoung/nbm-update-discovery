@@ -4,6 +4,7 @@ import { Accordion } from "@/components/Common";
 import { getDatasetPreflightMetadata } from "@/api/client";
 import { useSheetDetailStore } from "@/stores/sheetDetailStore";
 import { formatYearMonth } from "@/utils/formatters";
+import { formatCoordinateSystem } from "@/utils/coordinateSystem";
 import type {
   Dataset,
   DatasetPreflightRaster,
@@ -196,7 +197,7 @@ function RasterMetaGrid({ raster }: { raster: DatasetPreflightRaster }) {
         label="크기"
         value={`${raster.width.toLocaleString("ko-KR")} x ${raster.height.toLocaleString("ko-KR")}`}
       />
-      <MetaItem label="좌표계" value={raster.crs} wide />
+      <MetaItem label="좌표계" value={formatCoordinateSystem(raster.crs)} wide />
       <MetaItem label="밴드" value={`${raster.band_count}개`} />
       <MetaItem label="면적" value={formatArea(raster.footprint_area_m2)} />
     </div>

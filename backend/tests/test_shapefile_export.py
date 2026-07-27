@@ -116,7 +116,7 @@ def test_shapefile_endpoint_returns_zip(monkeypatch):
     monkeypatch.setattr(
         exports_module,
         "create_task_shapefile_zip",
-        lambda _db, _task_id, _layer_name: (b"PK\x03\x04TEST", 3),
+        lambda _db, _task_id, _layer_name, object_ids=None: (b"PK\x03\x04TEST", 3),
     )
     try:
         response = TestClient(app).get("/api/v1/tasks/task_test/export/shp")
@@ -128,3 +128,37 @@ def test_shapefile_endpoint_returns_zip(monkeypatch):
     assert response.headers["x-feature-count"] == "3"
     assert 'filename="20260713_142530.zip"' in response.headers["content-disposition"]
     assert response.content == b"PK\x03\x04TEST"
+
+
+def test_shapefile_selection_endpoint_passes_object_ids(monkeypatch):
+    class FakeSession:
+        def get(self, _model, _key):
+            return SimpleNamespace(
+                id="task_test",
+                name="선택 프로젝트",
+                created_at=datetime(2026, 7, 13, 5, 25, 30, tzinfo=timezone.utc),
+            )
+
+    def override_db():
+        yield FakeSession()
+
+    captured: list[str] | None = None
+
+    def fake_export(_db, _task_id, _layer_name, object_ids=None):
+        nonlocal captured
+        captured = object_ids
+        return b"PK\x03\x04SELECTED", len(object_ids or [])
+
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(exports_module, "create_task_shapefile_zip", fake_export)
+    try:
+        response = TestClient(app).post(
+            "/api/v1/tasks/task_test/export/shp",
+            json={"object_ids": ["obj_1", "obj_2"]},
+        )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    assert response.headers["x-feature-count"] == "2"
+    assert captured == ["obj_1", "obj_2"]

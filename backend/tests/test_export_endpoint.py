@@ -124,7 +124,7 @@ def test_400_when_no_detections(monkeypatch, client_with_fake_db):
     # write_task_detections_gpkg 가 0 을 반환하도록 강제
     monkeypatch.setattr(
         exports_module, "write_task_detections_gpkg",
-        lambda db, task_id, dest_dir=None: (Path(""), 0),
+        lambda db, task_id, dest_dir=None, object_ids=None: (Path(""), 0),
     )
 
     resp = client.post(
@@ -133,6 +133,26 @@ def test_400_when_no_detections(monkeypatch, client_with_fake_db):
     )
     assert resp.status_code == 400
     assert resp.json()["error"] == "no_detections"
+
+
+def test_3d_export_passes_selected_object_ids(monkeypatch, client_with_fake_db):
+    client, _ = client_with_fake_db
+    monkeypatch.setattr(dem_z_registry, "_service", SimpleNamespace())
+    captured = None
+
+    def fake_write(db, task_id, dest_dir=None, object_ids=None):
+        nonlocal captured
+        captured = object_ids
+        return Path(""), 0
+
+    monkeypatch.setattr(exports_module, "write_task_detections_gpkg", fake_write)
+    resp = client.post(
+        "/api/v1/tasks/task_test/export/dxf-3d",
+        json={"layer_name": "X", "object_ids": ["obj_1", "obj_2"]},
+    )
+
+    assert resp.status_code == 400
+    assert captured == ["obj_1", "obj_2"]
 
 
 # ============================================================
@@ -147,7 +167,7 @@ def test_422_when_missing_dem(monkeypatch, tmp_path, client_with_fake_db):
     fake_gpkg.touch()
     monkeypatch.setattr(
         exports_module, "write_task_detections_gpkg",
-        lambda db, task_id, dest_dir=None: (fake_gpkg, 1),
+        lambda db, task_id, dest_dir=None, object_ids=None: (fake_gpkg, 1),
     )
 
     class _FailingService:
@@ -189,7 +209,7 @@ def test_200_happy_path_with_real_service(
     # detection_gpkg 헬퍼는 fixture 의 polygons 를 그대로 반환
     monkeypatch.setattr(
         exports_module, "write_task_detections_gpkg",
-        lambda db, task_id, dest_dir=None: (export_env["polygons_path"], 2),
+        lambda db, task_id, dest_dir=None, object_ids=None: (export_env["polygons_path"], 2),
     )
 
     # 출력 디렉토리를 tmp_path 로 리다이렉트

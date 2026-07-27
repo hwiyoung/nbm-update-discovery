@@ -21,12 +21,17 @@ import type { ExportSaveTarget } from "./saveTarget";
 
 async function fetchTaskAndDetections(
   taskId: string,
+  objectIds?: string[],
 ): Promise<{ task: Task; detections: DetectionObject[] }> {
   const [task, detections] = await Promise.all([
     getTaskStatus(taskId),
     listTaskDetections(taskId),
   ]);
-  return { task, detections: detections.filter((d) => !d.is_deleted) };
+  const allowed = objectIds ? new Set(objectIds) : null;
+  return {
+    task,
+    detections: detections.filter((d) => !d.is_deleted && (!allowed || allowed.has(d.id))),
+  };
 }
 
 // ============================================================
@@ -39,10 +44,11 @@ async function fetchTaskAndDetections(
 export async function exportTaskAsShp(
   taskId: string,
   saveTarget?: ExportSaveTarget,
+  objectIds?: string[],
 ): Promise<void> {
   const [task, blob] = await Promise.all([
     getTaskStatus(taskId),
-    downloadTaskShapefile(taskId),
+    downloadTaskShapefile(taskId, objectIds),
   ]);
   const filename = `${getTaskFilenameStem(task)}.zip`;
   await saveExportBlob(blob, filename, "shp", saveTarget);
@@ -97,6 +103,7 @@ export async function exportTaskAs3dDxf(
   taskId: string,
   layerName: string = "CHANGE_DETECTION",
   saveTarget?: ExportSaveTarget,
+  objectIds?: string[],
 ): Promise<Export3dStatistics> {
   const base = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "") || "/api/v1";
 
@@ -104,7 +111,7 @@ export async function exportTaskAs3dDxf(
   const res = await fetch(`${base}/tasks/${encodeURIComponent(taskId)}/export/dxf-3d`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ layer_name: layerName }),
+    body: JSON.stringify({ layer_name: layerName, object_ids: objectIds }),
   });
   if (!res.ok) {
     let body: Export3dErrorBody = {};
@@ -133,8 +140,9 @@ export async function exportTaskAs3dDxf(
 export async function exportTaskAsDxf(
   taskId: string,
   saveTarget?: ExportSaveTarget,
+  objectIds?: string[],
 ): Promise<void> {
-  const { task, detections } = await fetchTaskAndDetections(taskId);
+  const { task, detections } = await fetchTaskAndDetections(taskId, objectIds);
 
   const Drawing = (await import("dxf-writer")).default as unknown as {
     new (): {
@@ -186,8 +194,9 @@ export async function exportTaskAsPdf(
   taskId: string,
   sourceElement?: HTMLElement,
   saveTarget?: ExportSaveTarget,
+  objectIds?: string[],
 ): Promise<void> {
-  const { task, detections: rawDetections } = await fetchTaskAndDetections(taskId);
+  const { task, detections: rawDetections } = await fetchTaskAndDetections(taskId, objectIds);
   const visibleCodes = new Set(VISIBLE_CHANGE_TYPES.map((item) => item.code));
   const detections = rawDetections.filter((det) => visibleCodes.has(det.change_type));
 

@@ -19,6 +19,7 @@ def write_task_detections_gpkg(
     db: Session,
     task_id: str,
     dest_dir: str | Path | None = None,
+    object_ids: list[str] | None = None,
 ) -> tuple[Path, int]:
     # geopandas 는 dem_z_export 와 동일 의존 라인 — 컨테이너 재빌드 전까지는
     # 미설치. import 를 함수 본문으로 지연시켜 서버 startup 을 보호한다.
@@ -37,13 +38,16 @@ def write_task_detections_gpkg(
     - 부수 속성은 module 의 _extract_attributes 에서 그대로 export 결과에 포함되므로
       detection.id / change_type / confidence / area_m2 / region_code / error_class 만 노출.
     """
+    if object_ids is not None and not object_ids:
+        return Path(""), 0
+    stmt = select(DetectionORM).where(
+        DetectionORM.task_id == task_id,
+        DetectionORM.is_deleted.is_(False),
+    )
+    if object_ids is not None:
+        stmt = stmt.where(DetectionORM.id.in_(list(dict.fromkeys(object_ids))))
     rows = (
-        db.execute(
-            select(DetectionORM).where(
-                DetectionORM.task_id == task_id,
-                DetectionORM.is_deleted.is_(False),
-            )
-        )
+        db.execute(stmt)
         .scalars()
         .all()
     )

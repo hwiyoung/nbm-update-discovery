@@ -1,31 +1,17 @@
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CalendarDays,
-  ChevronDown,
   Download,
   Eye,
-  FileText,
   Layers,
   Loader2,
-  Map as MapIcon,
-  Mountain,
   Pencil,
-  Save,
   Square,
   Trash2,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import { Badge, Button, Input, Modal, ModalDescription, Progress } from "@/components/Common";
-import {
-  canUseNativeSavePicker,
-  createExportSaveTarget,
-  type ExportKind,
-  type ExportSaveTarget,
-  getDefaultTaskExportFilename,
-  isExportSaveCanceled,
-} from "@/services/exporters/saveTarget";
+import { Badge, Progress } from "@/components/Common";
 import type { Task } from "@/types";
 import { formatDate, formatDateTime, formatNumber } from "@/utils/formatters";
 import { useSheetsStore } from "@/stores/sheetsStore";
@@ -33,6 +19,7 @@ import { useTasksStore } from "@/stores/tasksStore";
 import { cn } from "@/utils/cn";
 import { taskProgressMessageText } from "@/utils/taskProgress";
 import { EditTaskModal } from "./EditTaskModal";
+import { TaskExportDialog } from "./TaskExportDialog";
 
 /**
  * 변화탐지 작업(=프로젝트) row.
@@ -46,38 +33,6 @@ export interface TaskRowProps {
   task: Task;
   totalDetections: number;
 }
-
-const EXPORT_META: Record<ExportKind, {
-  label: string;
-  sub: string;
-  ext: string;
-  icon: React.ReactNode;
-}> = {
-  shp: {
-    label: "폴리곤 SHP",
-    sub: "EPSG:5186 + .prj 동봉",
-    ext: ".zip",
-    icon: <MapIcon size={14} />,
-  },
-  dxf: {
-    label: "폴리곤 DXF (2D)",
-    sub: "변화 유형별 layer",
-    ext: ".dxf",
-    icon: <MapIcon size={14} />,
-  },
-  dxf3d: {
-    label: "폴리곤 3D DXF",
-    sub: "vertex 별 DEM 높이 자동 적용",
-    ext: ".dxf",
-    icon: <Mountain size={14} />,
-  },
-  pdf: {
-    label: "리포트 PDF",
-    sub: "요약 + 그래프",
-    ext: ".pdf",
-    icon: <FileText size={14} />,
-  },
-};
 
 const STATUS_LABEL: Record<Task["status"], { label: string; tone: "blue" | "emerald" | "red" | "slate" | "amber" }> = {
   pending: { label: "대기", tone: "slate" },
@@ -296,319 +251,40 @@ export function TaskRow({ task, totalDetections }: TaskRowProps) {
 }
 
 // ============================================================
-// 내보내기 드롭다운 — 지원 브라우저는 OS 저장 탐색기, 미지원 브라우저는 다운로드 fallback.
+// 내보내기 — 클릭하면 지도 기반 관심지역 선택 팝업을 연다.
 // ============================================================
-export function ExportMenu({ task }: { task: Task }) {
+export function ExportMenu({
+  task,
+  buttonLabel = "내보내기",
+  buttonClassName,
+}: {
+  task: Task;
+  buttonLabel?: string;
+  buttonClassName?: string;
+}) {
   const [open, setOpen] = useState(false);
-  const [busyKind, setBusyKind] = useState<ExportKind | null>(null);
-  const [fallbackKind, setFallbackKind] = useState<ExportKind | null>(null);
-  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const disabled = task.sheet_codes.length === 0;
-
-  const updateMenuPosition = () => {
-    const rect = buttonRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const menuWidth = 248;
-    const left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth));
-    const top = Math.min(window.innerHeight - 260, rect.bottom + 6);
-    setMenuPosition({ top: Math.max(8, top), left });
-  };
-
-  useEffect(() => {
-    if (!open) return;
-    updateMenuPosition();
-    window.addEventListener("resize", updateMenuPosition);
-    window.addEventListener("scroll", updateMenuPosition, true);
-    return () => {
-      window.removeEventListener("resize", updateMenuPosition);
-      window.removeEventListener("scroll", updateMenuPosition, true);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (buttonRef.current?.contains(target)) return;
-      if (menuRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
-
-  const exportWithNativePicker = async (kind: ExportKind) => {
-    setOpen(false);
-    const tid = `export-${task.id}-${kind}`;
-    try {
-      const saveTarget = await createExportSaveTarget(
-        getDefaultTaskExportFilename(task, kind),
-        kind,
-      );
-      setBusyKind(kind);
-      toast.loading(`${EXPORT_META[kind].label} 생성 중…`, { id: tid });
-      const stats = await executeTaskExport(task.id, kind, saveTarget);
-      showExportSuccess(kind, stats, tid);
-    } catch (err) {
-      if (isExportSaveCanceled(err)) toast.dismiss(tid);
-      else toast.error(err instanceof Error ? err.message : "내보내기 실패", { id: tid });
-    } finally {
-      setBusyKind(null);
-    }
-  };
-
-  const onChoose = (kind: ExportKind) => {
-    setOpen(false);
-    if (canUseNativeSavePicker()) {
-      void exportWithNativePicker(kind);
-      return;
-    }
-    setFallbackKind(kind);
-  };
+  const disabled = task.sheet_codes.length === 0 || task.detection_count === 0;
 
   return (
     <>
       <button
-        ref={buttonRef}
         type="button"
-        disabled={disabled || busyKind !== null}
-        onClick={() => setOpen((value) => !value)}
+        disabled={disabled}
+        onClick={() => setOpen(true)}
         title={disabled ? "내보낼 객체가 없습니다" : "내보내기"}
-        className="inline-flex items-center gap-1 h-6 px-2 rounded text-[11px] font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        className={cn(
+          "inline-flex items-center gap-1 h-6 px-2 rounded text-[11px] font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
+          buttonClassName,
+        )}
       >
-        {busyKind ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
-        내보내기
-        <ChevronDown size={11} />
+        <Download size={11} />
+        {buttonLabel}
       </button>
-      {open
-        ? createPortal(
-          <div
-            ref={menuRef}
-            className="fixed z-[1200] w-[248px] rounded-md border border-slate-200 bg-white py-1 shadow-xl"
-            style={{ top: menuPosition.top, left: menuPosition.left }}
-          >
-            {(Object.keys(EXPORT_META) as ExportKind[]).map((kind) => (
-              <ExportItem
-                key={kind}
-                kind={kind}
-                onClick={() => onChoose(kind)}
-              />
-            ))}
-          </div>,
-          document.body,
-        )
-        : null}
-      <ExportFallbackDialog
+      <TaskExportDialog
         task={task}
-        kind={fallbackKind}
-        open={fallbackKind !== null}
-        onClose={() => setFallbackKind(null)}
+        open={open}
+        onClose={() => setOpen(false)}
       />
     </>
   );
-}
-
-function ExportItem({
-  kind,
-  onClick,
-}: {
-  kind: ExportKind;
-  onClick: () => void;
-}) {
-  const meta = EXPORT_META[kind];
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full px-3 py-2 text-left hover:bg-slate-50 transition-colors flex items-start gap-2"
-    >
-      <span className="mt-0.5 text-blue-600 shrink-0">{meta.icon}</span>
-      <span className="min-w-0">
-        <span className="block text-xs font-bold text-slate-700">
-          {meta.label}
-          <span className="ml-1 font-normal text-slate-400">{meta.ext}</span>
-        </span>
-        <span className="block text-[10px] text-slate-400">{meta.sub}</span>
-      </span>
-    </button>
-  );
-}
-
-function ExportFallbackDialog({
-  task,
-  kind,
-  open,
-  onClose,
-}: {
-  task: Task;
-  kind: ExportKind | null;
-  open: boolean;
-  onClose: () => void;
-}) {
-  const selectedKind = kind ?? "shp";
-  const [filename, setFilename] = useState(getDefaultTaskExportFilename(task, selectedKind));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open || !kind) return;
-    setFilename(getDefaultTaskExportFilename(task, kind));
-    setBusy(false);
-    setError(null);
-  }, [open, kind, task.id, task.name]);
-
-  const submit = async () => {
-    if (busy || !kind) return;
-    const normalized = normalizeExportFilename(filename, kind);
-    if (!normalized) {
-      setError("파일명을 입력하세요");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    const tid = `export-${task.id}-${kind}`;
-    toast.loading(`${EXPORT_META[kind].label} 생성 중…`, { id: tid });
-    try {
-      const saveTarget = await createExportSaveTarget(normalized, kind);
-      const stats = await executeTaskExport(task.id, kind, saveTarget);
-      showExportSuccess(kind, stats, tid);
-      onClose();
-    } catch (err) {
-      if (isExportSaveCanceled(err)) toast.dismiss(tid);
-      else toast.error(err instanceof Error ? err.message : "내보내기 실패", { id: tid });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen && !busy) onClose();
-      }}
-      title="브라우저 다운로드로 저장"
-      icon={<Download size={20} />}
-      width={560}
-      blockDismiss={busy}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>
-            취소
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => void submit()}
-            disabled={busy}
-            leftIcon={busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-          >
-            다운로드
-          </Button>
-        </>
-      }
-    >
-      <ModalDescription>현재 접속 환경에서는 OS 저장 탐색기 대신 브라우저 다운로드 사용</ModalDescription>
-
-      <div className="space-y-4">
-        <div className="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Firefox/Safari 또는 보안 연결이 아닌 주소에서는 로컬 저장 탐색기를 열 수 없습니다.
-          이 경우 파일명만 확인한 뒤 브라우저 다운로드 설정에 따라 저장됩니다.
-        </div>
-
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-          <div className="flex items-start gap-2">
-            <span className="mt-0.5 text-blue-600 shrink-0">{EXPORT_META[selectedKind].icon}</span>
-            <div className="min-w-0">
-              <div className="text-xs font-bold text-slate-700">{EXPORT_META[selectedKind].label}</div>
-              <div className="text-[11px] text-slate-500">{EXPORT_META[selectedKind].sub}</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-[90px_minmax(0,1fr)] items-center gap-3">
-          <label className="text-xs font-bold text-slate-500" htmlFor={`export-filename-${task.id}`}>
-            파일명
-          </label>
-          <Input
-            id={`export-filename-${task.id}`}
-            value={filename}
-            onChange={(e) => {
-              setFilename(e.target.value);
-              setError(null);
-            }}
-            disabled={busy}
-            invalid={Boolean(error)}
-            className="font-mono"
-          />
-        </div>
-
-        {error ? (
-          <div className="rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">
-            {error}
-          </div>
-        ) : null}
-      </div>
-    </Modal>
-  );
-}
-
-interface Export3dStats {
-  total_objects: number;
-  sheets_used: string[];
-  missing_sheets: string[];
-  objects_with_nodata: string[];
-}
-
-async function executeTaskExport(
-  taskId: string,
-  kind: ExportKind,
-  saveTarget: ExportSaveTarget,
-): Promise<Export3dStats | null> {
-  const mod = await import("@/services/exporters");
-  if (kind === "shp") {
-    await mod.exportTaskAsShp(taskId, saveTarget);
-    return null;
-  }
-  if (kind === "dxf") {
-    await mod.exportTaskAsDxf(taskId, saveTarget);
-    return null;
-  }
-  if (kind === "pdf") {
-    await mod.exportTaskAsPdf(taskId, undefined, saveTarget);
-    return null;
-  }
-  return await mod.exportTaskAs3dDxf(taskId, "CHANGE_DETECTION", saveTarget);
-}
-
-function showExportSuccess(
-  kind: ExportKind,
-  stats: Export3dStats | null,
-  toastId: string,
-): void {
-  if (kind !== "dxf3d" || !stats) {
-    toast.success(`${EXPORT_META[kind].label} 저장 요청 완료`, { id: toastId });
-    return;
-  }
-  const nodataNote =
-    stats.objects_with_nodata.length > 0
-      ? ` — ${stats.objects_with_nodata.length}개 객체에 NoData vertex 포함`
-      : "";
-  const missingNote =
-    stats.missing_sheets.length > 0
-      ? ` (DEM 누락 도엽 ${stats.missing_sheets.length}건)`
-      : "";
-  toast.success(
-    `3D DXF 저장 요청 완료 — ${stats.total_objects}객체 / ${stats.sheets_used.length}도엽${missingNote}${nodataNote}`,
-    { id: toastId, duration: 6000 },
-  );
-}
-
-function normalizeExportFilename(value: string, kind: ExportKind): string | null {
-  const clean = value.trim().replace(/[\\/:*?"<>|]/g, "_");
-  if (!clean) return null;
-  const ext = EXPORT_META[kind].ext;
-  if (clean.toLowerCase().endsWith(ext)) return clean;
-  return `${clean.replace(/\.[^.]*$/, "")}${ext}`;
 }

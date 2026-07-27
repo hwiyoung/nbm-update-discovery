@@ -24,6 +24,7 @@ import L from "leaflet";
 import "leaflet-draw";
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import {
+  applyDetectionFilter,
   useFilteredDetections,
   useSheetDetailStore,
   type RightPanelMode,
@@ -34,6 +35,7 @@ import type { Dataset, DetectionObject } from "@/types";
 import { ViewerModeToolbar } from "./ViewerModeToolbar";
 import { MapToolbar } from "./MapToolbar";
 import { cn } from "@/utils/cn";
+import { polygonsIntersect } from "@/utils/polygonSelection";
 
 /**
  * /sheets/:sheetCode 의 핵심 지도.
@@ -1135,7 +1137,10 @@ function DetectionsLayer({ readOnly = false }: { readOnly?: boolean } = {}) {
             // draw 모드: 클릭을 map 으로 전파해 leaflet-draw 가 vertex 받음.
             // edit 모드: 폴리곤 클릭 = 단일 선택 (EditController 가 이를 보고 vertex 편집 활성).
             if (tool === "draw") return;
-            if (tool === "lasso") {
+            const shiftPressed = Boolean(
+              (e as L.LeafletMouseEvent).originalEvent?.shiftKey,
+            );
+            if (tool === "lasso" || (tool === "select" && shiftPressed)) {
               const next = cur.includes(id)
                 ? cur.filter((x) => x !== id)
                 : [...cur, id];
@@ -1321,6 +1326,7 @@ function EditController() {
   const map = useMap();
   const allMaps = useContext(MapsContext);
   const editTool = useSheetDetailStore((s) => s.editTool);
+  const setEditTool = useSheetDetailStore((s) => s.setEditTool);
   const selectedIds = useSheetDetailStore((s) => s.selectedIds);
   const applyEditGeometry = useSheetDetailStore((s) => s.applyEditGeometry);
 
@@ -1345,6 +1351,7 @@ function EditController() {
       .filter((p): p is L.Polygon => p !== null);
 
     let edited = false;
+    let commitTimer: number | null = null;
     // vertex 드래그 중 + 완료 둘 다 listen → 다른 polygon 실시간 미러링
     const mirrorAndMark = () => {
       edited = true;
@@ -1357,12 +1364,25 @@ function EditController() {
         }
       }
     };
-    // editdrag: vertex 드래그 중 매 frame. edit: drag 완료 시.
-    polygon.on("edit", mirrorAndMark);
+    const commitAndExit = () => {
+      if (!edited) return;
+      // effect cleanup 에서 최종 좌표를 저장한다. 편집 완료 직후 선택 모드로
+      // 전환해야 히스토리도 사용자의 vertex 조작 직후 바로 갱신된다.
+      setEditTool("select");
+    };
+    const onEditComplete = () => {
+      mirrorAndMark();
+      if (commitTimer !== null) window.clearTimeout(commitTimer);
+      commitTimer = window.setTimeout(commitAndExit, 180);
+    };
+
+    // editdrag: vertex 드래그 중 매 frame. edit: drag/vertex 추가 완료 시.
+    polygon.on("edit", onEditComplete);
     polygon.on("editdrag", mirrorAndMark);
 
     return () => {
-      polygon.off("edit", mirrorAndMark);
+      if (commitTimer !== null) window.clearTimeout(commitTimer);
+      polygon.off("edit", onEditComplete);
       polygon.off("editdrag", mirrorAndMark);
       if (edited) {
         try {
@@ -1380,7 +1400,7 @@ function EditController() {
       }
       editable.disable();
     };
-  }, [editTool, selectedIds, map, allMaps, applyEditGeometry]);
+  }, [editTool, selectedIds, map, allMaps, applyEditGeometry, setEditTool]);
 
   return null;
 }
@@ -1412,8 +1432,9 @@ function EmptyClickClearController() {
 }
 
 // ============================================================
-// Lasso 드래그-박스 — 사각형 안 폴리곤 일괄 선택
-// editTool === 'lasso' 일 때만 활성.
+// Lasso 드래그-박스 — 사각형과 교차하는 폴리곤 일괄 선택
+// - 다중선택(lasso) 모드: 좌클릭 드래그로 새 선택, Shift+드래그로 기존 선택에 추가.
+// - 일반선택(select) 모드: Shift+좌클릭 드래그로 기존 선택에 추가.
 //
 // 가장 견고한 구현:
 //   - mousedown 은 window 의 capture phase 로 잡아 어떤 layer/handler 가 가로채기
@@ -1430,32 +1451,45 @@ function LassoBoxController() {
   const editTool = useSheetDetailStore((s) => s.editTool);
 
   useEffect(() => {
-    if (editTool !== "lasso") return;
+    if (editTool !== "lasso" && editTool !== "select") return;
 
     const container = map.getContainer();
     let startScreen: { x: number; y: number } | null = null;
     let boxDiv: HTMLDivElement | null = null;
     let dragMoved = false;
     let suppressNextClick = false;
+    let addToSelection = false;
     const DRAG_THRESHOLD_PX = 4;
 
-    // map 의 모든 인터랙션 비활성 (lasso 동안)
-    const restorers: (() => void)[] = [];
-    if (map.dragging.enabled()) {
-      map.dragging.disable();
-      restorers.push(() => map.dragging.enable());
+    const previousCursor = container.style.cursor;
+    const modeRestorers: (() => void)[] = [];
+    let dragRestorers: (() => void)[] = [];
+
+    const suspendMapInteractions = (restorers: (() => void)[]) => {
+      if (map.dragging.enabled()) {
+        map.dragging.disable();
+        restorers.push(() => map.dragging.enable());
+      }
+      if (map.boxZoom?.enabled()) {
+        map.boxZoom.disable();
+        restorers.push(() => map.boxZoom.enable());
+      }
+      if (map.doubleClickZoom.enabled()) {
+        map.doubleClickZoom.disable();
+        restorers.push(() => map.doubleClickZoom.enable());
+      }
+    };
+
+    const restoreDragInteractions = () => {
+      for (const restore of dragRestorers.splice(0)) restore();
+    };
+
+    if (editTool === "lasso") {
+      suspendMapInteractions(modeRestorers);
+      container.style.cursor = "crosshair";
+      L.DomUtil.disableImageDrag();
+      L.DomUtil.disableTextSelection();
     }
-    if (map.boxZoom?.enabled()) {
-      map.boxZoom.disable();
-      restorers.push(() => map.boxZoom.enable());
-    }
-    if (map.doubleClickZoom.enabled()) {
-      map.doubleClickZoom.disable();
-      restorers.push(() => map.doubleClickZoom.enable());
-    }
-    container.style.cursor = "crosshair";
-    L.DomUtil.disableImageDrag();
-    L.DomUtil.disableTextSelection();
 
     const removeBox = () => {
       if (boxDiv && boxDiv.parentNode) boxDiv.parentNode.removeChild(boxDiv);
@@ -1491,7 +1525,7 @@ function LassoBoxController() {
 
     const onMouseDown = (e: MouseEvent) => {
       if (!container.contains(e.target as Node)) return;
-      if (e.button === 1) {
+      if (e.button === 1 && editTool === "lasso") {
         // 휠 클릭 — 기본 동작(스크롤 모드) 차단 + pan 시작.
         e.preventDefault();
         panFrom = { x: e.clientX, y: e.clientY };
@@ -1499,8 +1533,20 @@ function LassoBoxController() {
         return;
       }
       if (e.button !== 0) return;
+      if (editTool === "select" && !e.shiftKey) return;
+
+      // Leaflet 기본 Shift+drag boxZoom 및 지도 pan보다 먼저 이벤트를 점유한다.
+      e.preventDefault();
+      e.stopPropagation();
+      if (editTool === "select") {
+        suspendMapInteractions(dragRestorers);
+        container.style.cursor = "crosshair";
+        L.DomUtil.disableImageDrag();
+        L.DomUtil.disableTextSelection();
+      }
       startScreen = { x: e.clientX, y: e.clientY };
       dragMoved = false;
+      addToSelection = e.shiftKey || editTool === "select";
     };
 
     const onMouseMove = (e: MouseEvent) => {
@@ -1534,6 +1580,12 @@ function LassoBoxController() {
       startScreen = null;
       dragMoved = false;
       removeBox();
+      if (editTool === "select") {
+        restoreDragInteractions();
+        container.style.cursor = previousCursor;
+        L.DomUtil.enableImageDrag();
+        L.DomUtil.enableTextSelection();
+      }
 
       if (!moved) return;
       // 드래그가 있었으면 그 직후 fire 될 click 이벤트 1개를 억제
@@ -1547,24 +1599,28 @@ function LassoBoxController() {
         map.containerPointToLatLng(startContainer),
         map.containerPointToLatLng(endContainer),
       );
-      const { detections, selectMany } = useSheetDetailStore.getState();
-      const hits: string[] = [];
-      for (const d of detections) {
-        if (d.is_deleted) continue;
-        const ring = d.geometry.coordinates[0] ?? [];
-        if (ring.length < 2) continue;
-        let lng = 0;
-        let lat = 0;
-        const n = ring.length - 1;
-        for (let i = 0; i < n; i += 1) {
-          const [x, y] = ring[i] as [number, number];
-          lng += x;
-          lat += y;
-        }
-        const center = L.latLng(lat / n, lng / n);
-        if (bounds.contains(center)) hits.push(d.id);
-      }
-      selectMany(hits);
+      const south = bounds.getSouth();
+      const west = bounds.getWest();
+      const north = bounds.getNorth();
+      const east = bounds.getEast();
+      const selectionPolygon: Polygon = {
+        type: "Polygon",
+        coordinates: [[
+          [west, south],
+          [east, south],
+          [east, north],
+          [west, north],
+          [west, south],
+        ]],
+      };
+      const state = useSheetDetailStore.getState();
+      const hits = applyDetectionFilter(state.detections, state.filter)
+        .filter((detection) => polygonsIntersect(selectionPolygon, detection.geometry))
+        .map((detection) => detection.id);
+      const next = addToSelection
+        ? Array.from(new Set([...state.selectedIds, ...hits]))
+        : hits;
+      state.selectMany(next);
     };
 
     const onClickCapture = (e: MouseEvent) => {
@@ -1586,10 +1642,11 @@ function LassoBoxController() {
       window.removeEventListener("mouseup", onMouseUp, true);
       window.removeEventListener("click", onClickCapture, true);
       removeBox();
-      container.style.cursor = "";
+      restoreDragInteractions();
+      container.style.cursor = previousCursor;
       L.DomUtil.enableImageDrag();
       L.DomUtil.enableTextSelection();
-      for (const r of restorers) r();
+      for (const restore of modeRestorers) restore();
     };
   }, [editTool, map]);
 

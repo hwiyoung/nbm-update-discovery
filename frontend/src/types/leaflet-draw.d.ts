@@ -32,5 +32,11 @@ declare module "leaflet" {
       enable(): void;
       disable(): void;
     }
+
+    class Circle {
+      constructor(map: L.Map, options?: DrawOptions);
+      enable(): void;
+      disable(): void;
+    }
   }
 }

@@ -1,6 +1,10 @@
 import { Accordion, Badge } from "@/components/Common";
 import { useSheetDetailStore } from "@/stores/sheetDetailStore";
-import { HISTORY_ACTION_LABEL } from "@/utils/constants";
+import {
+  CHANGE_TYPE_BY_CODE,
+  OBJECT_CATEGORY_LABEL,
+} from "@/utils/constants";
+import type { HistoryAction } from "@/types";
 import { formatDateTime } from "@/utils/formatters";
 
 /**
@@ -40,33 +44,74 @@ export function ReviewHistoryAccordion() {
         </p>
       ) : (
         <div className="space-y-1 max-h-72 overflow-y-auto custom-scrollbar -mr-1 pr-1">
-          {sorted.map((h) => (
-            <button
-              key={h.id}
-              type="button"
-              onClick={() => handleClick(h)}
-              className="w-full text-left px-2 py-2 rounded-md hover:bg-slate-50 transition-colors"
-            >
-              <div className="flex items-center justify-between gap-2 mb-0.5">
-                <span className="text-[11px] font-bold text-slate-700">
-                  {HISTORY_ACTION_LABEL[h.action]}
+          {sorted.map((h) => {
+            const opinion = historyOpinion(h);
+            return (
+              <button
+                key={h.id}
+                type="button"
+                onClick={() => handleClick(h)}
+                className="grid w-full grid-cols-[34px_38px_42px_82px_minmax(44px,1fr)_auto] items-center rounded-md px-2 py-2.5 text-left text-[11px] transition-colors hover:bg-slate-50"
+                title={`${simpleActionLabel(h.action)} | ${OBJECT_CATEGORY_LABEL[h.model]} | ${CHANGE_TYPE_BY_CODE[h.change_type].label} | ${h.object_id} | ${opinion} | ${formatDateTime(h.reviewed_at)}`}
+              >
+                <span className="font-bold text-slate-700">
+                  {simpleActionLabel(h.action)}
                 </span>
-                <span className="text-[10px] text-slate-400">
-                  {formatDateTime(h.reviewed_at)}
+                <span className="border-l border-slate-200 pl-1.5 text-slate-600">
+                  {OBJECT_CATEGORY_LABEL[h.model]}
                 </span>
-              </div>
-              <div className="text-[10px] text-slate-500 truncate">
-                {h.object_id} · {h.reviewer}
-              </div>
-              {h.memo ? (
-                <div className="text-[10px] text-slate-500 mt-0.5 italic truncate">
-                  "{h.memo}"
-                </div>
-              ) : null}
-            </button>
-          ))}
+                <span className="truncate border-l border-slate-200 pl-1.5 text-slate-600">
+                  {CHANGE_TYPE_BY_CODE[h.change_type].label}
+                </span>
+                <span className="truncate border-l border-slate-200 pl-1.5 font-mono text-blue-700" title={h.object_id}>
+                  {h.object_id}
+                </span>
+                <span className="truncate border-l border-slate-200 pl-1.5 text-slate-600" title={opinion}>
+                  {opinion}
+                </span>
+                <span className="whitespace-nowrap border-l border-slate-200 pl-1.5 text-slate-400 tabular-nums">
+                  {compactDateTime(h.reviewed_at)}
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
     </Accordion>
   );
+}
+
+function simpleActionLabel(action: HistoryAction): "생성" | "삭제" | "수정" | "의견" {
+  if (action === "create") return "생성";
+  if (action === "delete") return "삭제";
+  if (action === "edit_meta") return "의견";
+  return "수정";
+}
+
+function historyOpinion(history: ReturnType<typeof useSheetDetailStore.getState>["history"][number]): string {
+  for (const snapshot of [history.after, history.before]) {
+    if (!snapshot || !("reviewer_memo" in snapshot)) continue;
+    const memo = typeof snapshot.reviewer_memo === "string"
+      ? snapshot.reviewer_memo.trim()
+      : "";
+    return memo || "의견 없음";
+  }
+  const memo = history.memo?.trim();
+  return memo || "-";
+}
+
+function compactDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  const parts = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("month")}.${part("day")} ${part("hour")}:${part("minute")}`;
 }

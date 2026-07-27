@@ -70,17 +70,21 @@ def create_task_shapefile_zip(
     db: Session,
     task_id: str,
     layer_name: str,
+    object_ids: list[str] | None = None,
 ) -> tuple[bytes, int]:
     """Task의 활성 변화탐지 객체를 조회해 ZIP bytes와 작성 건수를 반환한다."""
+    if object_ids is not None and not object_ids:
+        return b"", 0
+    stmt = select(DetectionORM).where(
+        DetectionORM.task_id == task_id,
+        DetectionORM.is_deleted.is_(False),
+        DetectionORM.change_type != "building_color",
+    )
+    if object_ids is not None:
+        stmt = stmt.where(DetectionORM.id.in_(list(dict.fromkeys(object_ids))))
     rows = (
         db.execute(
-            select(DetectionORM)
-            .where(
-                DetectionORM.task_id == task_id,
-                DetectionORM.is_deleted.is_(False),
-                DetectionORM.change_type != "building_color",
-            )
-            .order_by(DetectionORM.id)
+            stmt.order_by(DetectionORM.id)
         )
         .scalars()
         .all()

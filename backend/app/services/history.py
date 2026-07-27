@@ -112,6 +112,8 @@ def infer_update_action(
         return "delete" if payload["is_deleted"] else "restore"
     if "geometry" in payload and payload["geometry"]:
         return "edit_geometry"
+    if "model" in payload or "change_type" in payload:
+        return "classify"
     if "reviewer_memo" in payload:
         return "edit_meta"
     return "edit_meta"

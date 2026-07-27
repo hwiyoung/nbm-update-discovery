@@ -713,14 +713,20 @@ export async function getTaskStatus(taskId: string): Promise<Task> {
  * Task의 활성 변화탐지 결과를 백엔드가 Fiona/GDAL로 생성한 UTF-8 SHP ZIP으로 받는다.
  * 브라우저에서 DBF를 만들지 않아 한글 속성의 실제 UTF-8 바이트를 보장한다.
  */
-export async function downloadTaskShapefile(taskId: string): Promise<Blob> {
+export async function downloadTaskShapefile(
+  taskId: string,
+  objectIds?: string[],
+): Promise<Blob> {
   if (useMock) {
     throw new Error("Mock 모드에서는 SHP 내보내기를 지원하지 않습니다");
   }
-  const res = await fetch(
-    `${API_BASE_URL}/tasks/${encodeURIComponent(taskId)}/export/shp`,
-    { headers: { Accept: "application/zip" } },
-  );
+  const res = await fetch(`${API_BASE_URL}/tasks/${encodeURIComponent(taskId)}/export/shp`, {
+    method: objectIds ? "POST" : "GET",
+    headers: objectIds
+      ? { Accept: "application/zip", "Content-Type": "application/json" }
+      : { Accept: "application/zip" },
+    body: objectIds ? JSON.stringify({ object_ids: objectIds }) : undefined,
+  });
   if (!res.ok) {
     let message = `SHP 내보내기 실패: HTTP ${res.status}`;
     try {
